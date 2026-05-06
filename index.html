@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>Plantas AR — Leitor Avançado</title>
+<title>Plantas em Realidade Aumentada</title>
 <script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
 <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onCVReady()"></script>
 <style>
@@ -169,17 +169,12 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
     
     
   </div>
-  <div class="how">
-    <div class="how-item"><div class="h-n">01</div><div class="h-t">Coloca a planta numa superfície plana, com <strong>boa iluminação uniforme</strong></div></div>
-    <div class="how-item"><div class="h-n">02</div><div class="h-t">Enquadra <strong>toda a planta</strong> dentro dos cantos vermelhos no ecrã</div></div>
-    <div class="how-item"><div class="h-n">03</div><div class="h-t">Carrega no <strong>botão de captura</strong> — aguarda o foco automático terminar</div></div>
-    <div class="how-item"><div class="h-n">04</div><div class="h-t">O OpenCV analisa as paredes e gera o <strong>modelo 3D interativo</strong></div></div>
-  </div>
+  
   <div class="btns">
     <button class="btn btn-r" onclick="startCam()">📷 Abrir Câmera</button>
     
   </div>
-  <p class="note-txt">Funciona offline após carregar. Requer HTTPS ou localhost. OpenCV (~8 MB) carrega uma vez.</p>
+  
 </div>
 
 <!-- DICAS -->
@@ -208,15 +203,15 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
 </div>
 <div id="scan-pulse"></div>
 <div id="cam-hud">
-  <div class="ch-title">Leitor de Plantas</div>
+  <div class="ch-title">Planta em RA</div>
   <div class="ch-status" id="cam-status-badge"><div class="blink"></div><span id="cam-status-txt">Câmera ativa</span></div>
 </div>
 <div id="cap-area">
-  <div class="cap-hint">Enquadra toda a planta dentro dos cantos.<br>Espera o foco e carrega para capturar.</div>
+  <div class="cap-hint">Enquadra toda a planta dentro dos cantos.</div>
   <button class="cap-btn" id="cap-btn" onclick="captureFrame()" title="Capturar"></button>
   <div class="cv-loading" id="cv-loading" style="display:none">
     <div class="blink" style="background:var(--amber)"></div>
-    <span>A carregar OpenCV...</span>
+    <span>A carregar...</span>
   </div>
 </div>
 
