@@ -171,8 +171,9 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
 <div id="splash">
   <div class="sp-hero">
     <div class="sp-icon">📐</div>
-    <div class="sp-tag">Realidade Aumentade</div>
-    
+    <div class="sp-tag">Leitor de Plantas AR v2</div>
+    <div class="sp-title">Planta 2D → Estrutura 3D</div>
+    <div class="sp-sub">Aponta a câmera para qualquer planta impressa. O algoritmo deteta as paredes e reconstrói a estrutura em 3D — 100% offline.</div>
   </div>
   <div class="how">
     <div class="how-item"><div class="h-n">01</div><div class="h-t">Coloca a planta numa superfície plana, com <strong>boa iluminação uniforme</strong></div></div>
@@ -182,12 +183,24 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
   </div>
   <div class="btns">
     <button class="btn btn-r" onclick="startCam()">📷 Abrir Câmera</button>
-    
+    <button class="btn btn-o" onclick="showTips()">💡 Dicas para melhor resultado</button>
   </div>
-  
+  <p class="note-txt">Funciona offline após carregar. Requer HTTPS ou localhost. OpenCV (~8 MB) carrega uma vez.</p>
 </div>
 
-
+<!-- DICAS -->
+<div id="tips-view">
+  <div class="tips-title">Melhores Resultados</div>
+  <div class="tip-grid">
+    <div class="tip-card"><div class="tc-icon">💡</div><div class="tc-title">Iluminação</div><div class="tc-desc">Luz natural difusa. Sem reflexos nem sombras no papel</div></div>
+    <div class="tip-card"><div class="tc-icon">📐</div><div class="tc-title">Ângulo reto</div><div class="tc-desc">Câmera perpendicular à planta, de cima para baixo</div></div>
+    <div class="tip-card"><div class="tc-icon">🖨️</div><div class="tc-title">Impressão nítida</div><div class="tc-desc">Papel branco mate, tinta preta escura, linhas bem visíveis</div></div>
+    <div class="tip-card"><div class="tc-icon">📏</div><div class="tc-title">A4 ou maior</div><div class="tc-desc">Planta maior facilita a deteção. Ocupa 80%+ do ecrã</div></div>
+    <div class="tip-card"><div class="tc-icon">🔲</div><div class="tc-title">Paredes duplas</div><div class="tc-desc">Plantas arquitetónicas reais funcionam muito bem</div></div>
+    <div class="tip-card"><div class="tc-icon">📱</div><div class="tc-title">Estabilidade</div><div class="tc-desc">Segura firme ao capturar. Espera o foco automático</div></div>
+  </div>
+  <button class="btn btn-o" style="width:100%;max-width:360px;margin-top:.5rem" onclick="hideTips()">← Voltar</button>
+</div>
 
 <!-- CÂMERA -->
 <div id="cam-view">
@@ -209,7 +222,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
   <button class="cap-btn" id="cap-btn" onclick="captureFrame()" title="Capturar"></button>
   <div class="cv-loading" id="cv-loading" style="display:none">
     <div class="blink" style="background:var(--amber)"></div>
-    <span>A carregar...</span>
+    <span>A carregar OpenCV...</span>
   </div>
 </div>
 
@@ -419,14 +432,14 @@ async function runPipeline(imgData){
   // Essencial para plantas com iluminação não-uniforme ou baixo contraste
   setProgress(1,'Melhorar contraste (CLAHE)...');await sleep(25);
   let enhanced=new cv.Mat();
-  const clahe=new cv.CLAHE(2.5,new cv.Size(8,8));
+  const clahe=new cv.CLAHE(3.0,new cv.Size(6,6));
   clahe.apply(gray,enhanced);
   clahe.delete();gray.delete();
 
   // ── 2: Gaussian blur leve — remove ruído de impressão e artefactos digitais
   setProgress(2,'Remover ruído...');await sleep(20);
   let blurred=new cv.Mat();
-  cv.GaussianBlur(enhanced,blurred,new cv.Size(3,3),0.7);
+  cv.GaussianBlur(enhanced,blurred,new cv.Size(5,5),0.8);
   enhanced.delete();
 
   // ── 3: Binarização Otsu — adaptativa ao histograma da imagem
@@ -445,7 +458,7 @@ async function runPipeline(imgData){
   // ── 4: Isolar linhas estruturais longas H e V
   // Comprimento mínimo: 7% do lado menor — exclui linhas de mobília (curtas e isoladas)
   setProgress(4);await sleep(25);
-  const structMinPx=Math.round(minDim*0.07);
+  const structMinPx=Math.round(minDim*0.06);
   const kh=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(structMinPx,1));
   const kv=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(1,structMinPx));
   let horiz=new cv.Mat(),vert=new cv.Mat();
@@ -459,13 +472,13 @@ async function runPipeline(imgData){
   // ── 5: Fechar paredes duplas + esqueleto
   // Paredes arquitetónicas têm espessura real — dilatar fecha o gap entre as duas linhas
   setProgress(5,'Fechar paredes duplas...');await sleep(20);
-  const gapClose=Math.round(minDim*0.022);
+  const gapClose=Math.round(minDim*0.026);
   const kd=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(gapClose,gapClose));
   let wallsClosed=new cv.Mat();
   cv.dilate(walls,wallsClosed,kd);
   kd.delete();
   // Erosão controlada — não engrossar excessivamente
-  const erodeAmt=Math.max(1,Math.round(gapClose*0.45));
+  const erodeAmt=Math.max(1,Math.round(gapClose*0.4));
   const ke=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(erodeAmt,erodeAmt));
   let wallsFinal=new cv.Mat();
   cv.erode(wallsClosed,wallsFinal,ke);
@@ -481,9 +494,9 @@ async function runPipeline(imgData){
   // minLineLength: 3.5% — aceita paredes interiores mais curtas
   // maxLineGap: 1.5% — permite juntar segmentos com gaps de portas/janelas
   // acumulador: 18 — mais sensível mas ainda filtra ruído
-  const minLen=Math.round(minDim*0.035);
-  const maxGap=Math.round(minDim*0.015);
-  cv.HoughLinesP(skel,lines,1,Math.PI/180,18,minLen,maxGap);
+  const minLen=Math.round(minDim*0.03);
+  const maxGap=Math.round(minDim*0.018);
+  cv.HoughLinesP(skel,lines,1,Math.PI/180,15,minLen,maxGap);
   skel.delete();
   const rawCount=lines.rows;
 
@@ -491,9 +504,9 @@ async function runPipeline(imgData){
   setProgress(7);await sleep(20);
   const snapped=[];
   // Tolerância de snap: 13° — aceita linhas levemente inclinadas (distorção de câmera)
-  const snapTol=13;
-  // Filtro: 5.5% do lado menor — descarta linhas de texto, cotas, mobília
-  const filterLen=minDim*0.055;
+  const snapTol=12;
+  // Filtro: 5% do lado menor — descarta linhas de texto, cotas, mobília
+  const filterLen=minDim*0.05;
   for(let i=0;i<lines.rows;i++){
     const[x1,y1,x2,y2]=[lines.data32S[i*4],lines.data32S[i*4+1],
                          lines.data32S[i*4+2],lines.data32S[i*4+3]];
@@ -515,16 +528,15 @@ async function runPipeline(imgData){
 
   // ── 8: Merge colinear + filtro anti-mobília
   setProgress(8,'Merge + filtro anti-mobília...');await sleep(20);
-  // axisTol: 2% — janela de proximidade para colinearidade
-  // gapTol: 3.5% — tolera gaps de portas/janelas ao fazer merge
-  const merged=mergeColinear(snapped,minDim*0.02,minDim*0.035);
+  // axisTol: 1.8% — janela de proximidade para colinearidade (mais preciso)
+  // gapTol: 4% — tolera gaps maiores de portas/janelas ao fazer merge
+  const merged=mergeColinear(snapped,minDim*0.018,minDim*0.04);
 
-  // Filtro de comprimento final — paredes estruturais são tipicamente >7% do lado menor
-  const structural=merged.filter(l=>l.len>minDim*0.07);
+  // Filtro de comprimento final — paredes estruturais são tipicamente >6.5% do lado menor
+  const structural=merged.filter(l=>l.len>minDim*0.065);
 
   // Filtro de proximidade — paredes reais têm sempre paredes perpendiculares próximas
-  // Mobília fica isolada; paredes formam cantos e junções em T
-  const filtered=filterIsolatedSegments(structural,minDim*0.18);
+  const filtered=filterIsolatedSegments(structural,minDim*0.2);
 
   if(filtered.length<2){
     throw new Error(
@@ -584,7 +596,7 @@ async function skeletonize(mat){
   const k=cv.getStructuringElement(cv.MORPH_CROSS,new cv.Size(3,3));
   let img=mat.clone();
   let done=false,itr=0;
-  while(!done&&itr<55){
+  while(!done&&itr<70){
     itr++;
     cv.erode(img,eroded,k);
     cv.dilate(eroded,temp,k);
