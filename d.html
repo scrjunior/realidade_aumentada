@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Casa AR com Planta</title>
+
+  <link rel="stylesheet" href="style.css" />
+
+  <script src="https://aframe.io/releases/1.7.0/aframe.min.js"></script>
+  <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <div id="overlay">
+    <div class="box">
+      <h1>Casa em AR</h1>
+      <p>Aponte a câmera para a planta.</p>
+      <p id="status">A carregar...</p>
+    </div>
+  </div>
+
+  <a-scene
+    embedded
+    vr-mode-ui="enabled: false"
+    renderer="logarithmicDepthBuffer: true;"
+    arjs="trackingMethod: best; sourceType: webcam; debugUIEnabled: false;"
+  >
+    <a-assets>
+      <a-asset-item id="modeloCasa" src="./assets/casa.glb"></a-asset-item>
+    </a-assets>
+
+    <a-nft
+      type="nft"
+      url="./assets/planta"
+      smooth="true"
+      smoothCount="10"
+      smoothTolerance="0.01"
+      smoothThreshold="5"
+    >
+      <a-entity
+        gltf-model="#modeloCasa"
+        position="0 0 0"
+        rotation="-90 0 0"
+        scale="0.2 0.2 0.2"
+      ></a-entity>
+    </a-nft>
+
+    <a-entity camera></a-entity>
+  </a-scene>
+</body>
+</html>

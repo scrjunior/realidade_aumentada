@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Plantas AR — Leitor Avançado</title>
+<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
+<script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onCVReady()"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --ink:#0d0f14;--paper:#f2ede4;
+  --red:#c8392b;--green:#16a34a;--amber:#d97706;
+  --surface:rgba(242,237,228,.04);--border:rgba(242,237,228,.09);
+  --muted:#6b7280;--font:'DM Sans',sans-serif;--mono:'DM Mono',monospace;
+}
+html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
+  font-family:var(--font);color:var(--paper);-webkit-font-smoothing:antialiased}
+
+/* ── SPLASH ── */
+#splash{position:fixed;inset:0;background:var(--ink);z-index:100;
+  display:flex;flex-direction:column;align-items:center;
+  padding:0 1.5rem 2rem;overflow-y:auto}
+.sp-hero{width:100%;max-width:360px;display:flex;flex-direction:column;align-items:center;
+  padding:2.5rem 0 1.5rem;gap:10px;text-align:center}
+.sp-icon{width:56px;height:56px;border:1.5px solid var(--red);display:flex;
+  align-items:center;justify-content:center;font-size:24px;position:relative;margin-bottom:4px}
+.sp-icon::before{content:'';position:absolute;inset:-5px;border:1px solid rgba(200,57,43,.25)}
+.sp-tag{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--red);text-transform:uppercase}
+.sp-title{font-size:22px;font-weight:600;line-height:1.3;color:var(--paper)}
+.sp-sub{font-size:13px;color:var(--muted);line-height:1.65;max-width:280px}
+.how{width:100%;max-width:360px;border:1px solid var(--border);border-radius:2px;overflow:hidden;margin-bottom:1.4rem}
+.how-item{display:flex;align-items:flex-start;gap:10px;padding:11px 14px;background:var(--surface)}
+.how-item+.how-item{border-top:1px solid var(--border)}
+.h-n{font-family:var(--mono);font-size:11px;color:var(--red);min-width:18px;margin-top:1px}
+.h-t{font-size:12px;color:var(--paper);line-height:1.55;opacity:.85}
+.h-t strong{opacity:1;font-weight:500}
+.btns{width:100%;max-width:360px;display:flex;flex-direction:column;gap:8px;margin-bottom:1rem}
+.btn{width:100%;padding:13px;border-radius:2px;border:none;font-family:var(--font);
+  font-size:14px;font-weight:500;cursor:pointer;transition:all .15s;letter-spacing:.01em}
+.btn:active{transform:scale(.98)}
+.btn-r{background:var(--red);color:white}.btn-r:hover{background:#a82d22}
+.btn-o{background:transparent;border:1px solid var(--border);color:var(--paper)}.btn-o:hover{background:var(--surface)}
+.note-txt{font-size:11px;color:var(--muted);text-align:center;max-width:290px;line-height:1.6}
+
+/* ── CÂMERA ── */
+#cam-view{display:none;position:fixed;inset:0}
+#cam-view.on{display:block}
+#video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:1}
+#frame-guide{position:fixed;inset:0;z-index:2;pointer-events:none;display:flex;align-items:center;justify-content:center}
+.frame-box{width:82%;max-width:400px;aspect-ratio:3/4;position:relative}
+.fc{position:absolute;width:22px;height:22px;border-color:var(--red);border-style:solid;opacity:.8}
+.fc.tl{top:0;left:0;border-width:2px 0 0 2px}.fc.tr{top:0;right:0;border-width:2px 2px 0 0}
+.fc.bl{bottom:0;left:0;border-width:0 0 2px 2px}.fc.br{bottom:0;right:0;border-width:0 2px 2px 0}
+#scan-pulse{position:fixed;left:9%;right:9%;height:1px;z-index:3;pointer-events:none;
+  background:linear-gradient(to right,transparent,var(--red),transparent);
+  display:none;animation:scanmove 2.8s ease-in-out infinite}
+#scan-pulse.on{display:block}
+@keyframes scanmove{0%{top:12%;opacity:0}8%{opacity:1}92%{opacity:1}100%{top:88%;opacity:0}}
+#cam-hud{position:fixed;top:0;left:0;right:0;z-index:10;display:none;
+  background:linear-gradient(to bottom,rgba(13,15,20,.88) 0%,transparent);
+  padding:14px 16px;align-items:center;justify-content:space-between}
+#cam-hud.on{display:flex}
+.ch-title{font-family:var(--mono);font-size:10px;letter-spacing:.15em;color:var(--paper);text-transform:uppercase;opacity:.65}
+.ch-status{font-family:var(--mono);font-size:10px;display:flex;align-items:center;gap:5px;
+  color:var(--red);background:rgba(200,57,43,.1);border:1px solid rgba(200,57,43,.2);padding:4px 10px;border-radius:2px}
+.blink{width:5px;height:5px;border-radius:50%;background:currentColor;animation:blink 1.2s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+#cap-area{position:fixed;bottom:0;left:0;right:0;z-index:10;display:none;
+  background:linear-gradient(to top,rgba(13,15,20,.95) 60%,transparent);
+  padding:16px 20px 34px;flex-direction:column;align-items:center;gap:10px}
+#cap-area.on{display:flex}
+.cap-hint{font-size:12px;color:var(--muted);text-align:center;max-width:250px;line-height:1.55}
+.cap-btn{width:60px;height:60px;border-radius:50%;border:2.5px solid var(--red);
+  background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  position:relative;transition:transform .15s}
+.cap-btn::after{content:'';position:absolute;inset:7px;border-radius:50%;background:var(--red)}
+.cap-btn:active{transform:scale(.9)}
+.cv-loading{font-family:var(--mono);font-size:10px;color:var(--amber);text-align:center;display:flex;align-items:center;gap:6px}
+
+/* ── PREVIEW ── */
+#preview-view{display:none;position:fixed;inset:0;background:#000;flex-direction:column}
+#preview-view.on{display:flex}
+#preview-canvas{width:100%;flex:1;object-fit:contain}
+.prev-bar{background:rgba(13,15,20,.96);padding:14px 16px 30px;display:flex;flex-direction:column;gap:10px}
+.prev-title{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--red);text-transform:uppercase;text-align:center}
+.prev-quality{font-size:12px;color:var(--muted);text-align:center;line-height:1.5}
+.prev-quality strong{color:var(--paper)}
+.prev-btns{display:flex;gap:8px}
+.prev-btn{flex:1;padding:12px;border-radius:2px;border:none;font-family:var(--font);font-size:13px;font-weight:500;cursor:pointer}
+.prev-btn.go{background:var(--red);color:white}
+.prev-btn.back{background:var(--surface);border:1px solid var(--border);color:var(--paper)}
+
+/* ── PROGRESSO ── */
+#prog-view{display:none;position:fixed;inset:0;background:rgba(13,15,20,.94);z-index:80;
+  flex-direction:column;align-items:center;justify-content:center;gap:20px;padding:2rem}
+#prog-view.on{display:flex}
+.prog-label{font-family:var(--mono);font-size:10px;letter-spacing:.15em;color:var(--red);text-transform:uppercase}
+.prog-track{width:260px;height:2px;background:rgba(242,237,228,.08);border-radius:1px;overflow:hidden}
+.prog-fill{height:100%;background:var(--red);border-radius:1px;transition:width .35s ease;width:0}
+.prog-msg{font-size:12px;color:var(--paper);opacity:.6;text-align:center;max-width:240px;line-height:1.5}
+.prog-list{display:flex;flex-direction:column;gap:5px;width:260px}
+.p-item{font-size:11px;display:flex;align-items:center;gap:7px;opacity:.3;transition:opacity .3s}
+.p-item.active{opacity:1;color:var(--paper)}.p-item.done{opacity:.7;color:var(--green)}
+.p-dot{width:5px;height:5px;border-radius:50%;background:currentColor;flex-shrink:0}
+
+/* ── 3D VIEW ── */
+#view3d{display:none;position:fixed;inset:0}
+#view3d.on{display:flex;flex-direction:column}
+#c3d{display:block;width:100%;flex:1}
+.v3-hud{position:fixed;top:0;left:0;right:0;z-index:10;
+  background:linear-gradient(to bottom,rgba(13,15,20,.9) 0%,transparent);
+  padding:13px 16px;display:flex;align-items:center;justify-content:space-between}
+.v3-title{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--paper);text-transform:uppercase;opacity:.6}
+.v3-info{font-family:var(--mono);font-size:10px;color:var(--green);
+  background:rgba(22,163,74,.1);border:1px solid rgba(22,163,74,.22);padding:4px 10px;border-radius:2px}
+.v3-ctrls{position:fixed;bottom:0;left:0;right:0;z-index:10;
+  background:linear-gradient(to top,rgba(13,15,20,.96) 65%,transparent);
+  padding:12px 12px 30px;display:flex;flex-direction:column;gap:8px}
+.v3-label{font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
+.v3-row{display:flex;gap:5px}
+.v3-btn{flex:1;padding:9px 4px;border-radius:2px;border:1px solid var(--border);
+  background:var(--surface);color:var(--paper);font-family:var(--font);
+  font-size:11px;font-weight:500;cursor:pointer;text-align:center;transition:all .12s}
+.v3-btn.on{background:rgba(200,57,43,.12);border-color:rgba(200,57,43,.35);color:var(--red)}
+.v3-btn:active{transform:scale(.96)}
+.v3-btn .ic{font-size:15px;display:block;margin-bottom:2px}
+.stats{background:var(--surface);border:1px solid var(--border);border-radius:2px;
+  padding:9px 12px;display:grid;grid-template-columns:1fr 1fr;gap:6px 16px}
+.stat{display:flex;flex-direction:column;gap:1px}
+.stat-label{font-size:10px;color:var(--muted)}
+.stat-val{font-family:var(--mono);font-size:12px;color:var(--red)}
+.touch-hint{font-size:10px;color:var(--muted);text-align:center;opacity:.7}
+
+/* ── DICAS ── */
+#tips-view{display:none;position:fixed;inset:0;background:var(--ink);z-index:90;
+  overflow-y:auto;padding:2rem 1.5rem;flex-direction:column;align-items:center;gap:1rem}
+#tips-view.on{display:flex}
+.tips-title{font-family:var(--mono);font-size:11px;letter-spacing:.15em;color:var(--red);text-transform:uppercase}
+.tip-grid{width:100%;max-width:360px;display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tip-card{background:var(--surface);border:1px solid var(--border);border-radius:2px;padding:13px 11px;display:flex;flex-direction:column;gap:5px}
+.tc-icon{font-size:18px}.tc-title{font-size:12px;font-weight:500;color:var(--paper)}
+.tc-desc{font-size:11px;color:var(--muted);line-height:1.5}
+
+.back-btn{position:fixed;top:12px;right:12px;z-index:60;width:34px;height:34px;
+  border-radius:2px;border:1px solid var(--border);background:rgba(13,15,20,.8);
+  color:var(--paper);font-size:13px;display:none;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(6px)}
+.back-btn.on{display:flex}
+#err-view{display:none;position:fixed;inset:0;background:var(--ink);z-index:200;
+  flex-direction:column;align-items:center;justify-content:center;gap:1rem;padding:2rem}
+#err-view.on{display:flex}
+.err-ico{font-size:42px}
+.err-msg{font-size:14px;text-align:center;line-height:1.6;max-width:300px;font-weight:500}
+.err-det{font-size:11px;color:var(--muted);max-width:300px;padding:11px;
+  background:var(--surface);border:1px solid var(--border);border-radius:2px;line-height:1.7;white-space:pre-line;text-align:center}
+#cv-canvas{display:none}
+</style>
+</head>
+<body>
+
+<!-- SPLASH -->
+<div id="splash">
+  <div class="sp-hero">
+    <div class="sp-icon">📐</div>
+    <div class="sp-tag">Leitor de Plantas AR v2</div>
+    <div class="sp-title">Planta 2D → Estrutura 3D</div>
+    <div class="sp-sub">Aponta a câmera para qualquer planta impressa. O algoritmo deteta as paredes e reconstrói a estrutura em 3D — 100% offline.</div>
+  </div>
+  <div class="how">
+    <div class="how-item"><div class="h-n">01</div><div class="h-t">Coloca a planta numa superfície plana, com <strong>boa iluminação uniforme</strong></div></div>
+    <div class="how-item"><div class="h-n">02</div><div class="h-t">Enquadra <strong>toda a planta</strong> dentro dos cantos vermelhos no ecrã</div></div>
+    <div class="how-item"><div class="h-n">03</div><div class="h-t">Carrega no <strong>botão de captura</strong> — aguarda o foco automático terminar</div></div>
+    <div class="how-item"><div class="h-n">04</div><div class="h-t">O OpenCV analisa as paredes e gera o <strong>modelo 3D interativo</strong></div></div>
+  </div>
+  <div class="btns">
+    <button class="btn btn-r" onclick="startCam()">📷 Abrir Câmera</button>
+    <button class="btn btn-o" onclick="showTips()">💡 Dicas para melhor resultado</button>
+  </div>
+  <p class="note-txt">Funciona offline após carregar. Requer HTTPS ou localhost. OpenCV (~8 MB) carrega uma vez.</p>
+</div>
+
+<!-- DICAS -->
+<div id="tips-view">
+  <div class="tips-title">Melhores Resultados</div>
+  <div class="tip-grid">
+    <div class="tip-card"><div class="tc-icon">💡</div><div class="tc-title">Iluminação</div><div class="tc-desc">Luz natural difusa. Sem reflexos nem sombras no papel</div></div>
+    <div class="tip-card"><div class="tc-icon">📐</div><div class="tc-title">Ângulo reto</div><div class="tc-desc">Câmera perpendicular à planta, de cima para baixo</div></div>
+    <div class="tip-card"><div class="tc-icon">🖨️</div><div class="tc-title">Impressão nítida</div><div class="tc-desc">Papel branco mate, tinta preta escura, linhas bem visíveis</div></div>
+    <div class="tip-card"><div class="tc-icon">📏</div><div class="tc-title">A4 ou maior</div><div class="tc-desc">Planta maior facilita a deteção. Ocupa 80%+ do ecrã</div></div>
+    <div class="tip-card"><div class="tc-icon">🔲</div><div class="tc-title">Paredes duplas</div><div class="tc-desc">Plantas arquitetónicas reais funcionam muito bem</div></div>
+    <div class="tip-card"><div class="tc-icon">📱</div><div class="tc-title">Estabilidade</div><div class="tc-desc">Segura firme ao capturar. Espera o foco automático</div></div>
+  </div>
+  <button class="btn btn-o" style="width:100%;max-width:360px;margin-top:.5rem" onclick="hideTips()">← Voltar</button>
+</div>
+
+<!-- CÂMERA -->
+<div id="cam-view">
+  <video id="video" autoplay playsinline muted></video>
+  <div id="frame-guide">
+    <div class="frame-box">
+      <div class="fc tl"></div><div class="fc tr"></div>
+      <div class="fc bl"></div><div class="fc br"></div>
+    </div>
+  </div>
+</div>
+<div id="scan-pulse"></div>
+<div id="cam-hud">
+  <div class="ch-title">Leitor de Plantas</div>
+  <div class="ch-status" id="cam-status-badge"><div class="blink"></div><span id="cam-status-txt">Câmera ativa</span></div>
+</div>
+<div id="cap-area">
+  <div class="cap-hint">Enquadra toda a planta dentro dos cantos.<br>Espera o foco e carrega para capturar.</div>
+  <button class="cap-btn" id="cap-btn" onclick="captureFrame()" title="Capturar"></button>
+  <div class="cv-loading" id="cv-loading" style="display:none">
+    <div class="blink" style="background:var(--amber)"></div>
+    <span>A carregar OpenCV...</span>
+  </div>
+</div>
+
+<!-- PREVIEW -->
+<div id="preview-view">
+  <canvas id="preview-canvas"></canvas>
+  <div class="prev-bar">
+    <div class="prev-title">Imagem capturada</div>
+    <div class="prev-quality" id="prev-quality">Verifica se a planta está nítida e enquadrada.</div>
+    <div class="prev-btns">
+      <button class="prev-btn back" onclick="retake()">↩ Nova foto</button>
+      <button class="prev-btn go" onclick="processImage()">⚙ Analisar planta</button>
+    </div>
+  </div>
+</div>
+
+<!-- PROGRESSO -->
+<div id="prog-view">
+  <div class="prog-label">A analisar planta</div>
+  <div class="prog-track"><div class="prog-fill" id="prog-fill"></div></div>
+  <div class="prog-list" id="prog-list"></div>
+  <div class="prog-msg" id="prog-msg">Aguarda...</div>
+</div>
+
+<!-- 3D VIEW -->
+<div id="view3d">
+  <div class="v3-hud">
+    <div class="v3-title">Estrutura 3D</div>
+    <div class="v3-info" id="v3-info">—</div>
+  </div>
+  <canvas id="c3d"></canvas>
+  <div class="v3-ctrls">
+    <div class="v3-label">Vista</div>
+    <div class="v3-row">
+      <button class="v3-btn on" id="vb-3d" onclick="set3dView('3d')"><span class="ic">🏠</span>3D</button>
+      <button class="v3-btn" id="vb-top" onclick="set3dView('top')"><span class="ic">🗺️</span>Topo</button>
+      <button class="v3-btn" id="vb-wf" onclick="toggleWF()"><span class="ic">⬡</span>Malha</button>
+      <button class="v3-btn" id="vb-new" onclick="goBackCam()"><span class="ic">📷</span>Nova</button>
+    </div>
+    <div class="stats" id="stats-box">
+      <div class="stat"><div class="stat-label">Paredes</div><div class="stat-val" id="s-walls">—</div></div>
+      <div class="stat"><div class="stat-label">Divisões est.</div><div class="stat-val" id="s-rooms">—</div></div>
+      <div class="stat"><div class="stat-label">Resolução</div><div class="stat-val" id="s-res">—</div></div>
+      <div class="stat"><div class="stat-label">Linhas brutas</div><div class="stat-val" id="s-raw">—</div></div>
+    </div>
+    <div class="touch-hint">Arrastar para rodar · Dois dedos para zoom · Vista Topo bloqueia rotação</div>
+  </div>
+</div>
+
+<button class="back-btn" id="back-btn" onclick="goBack()">✕</button>
+<canvas id="cv-canvas"></canvas>
+
+<div id="err-view">
+  <div class="err-ico">⚠️</div>
+  <div class="err-msg" id="err-msg"></div>
+  <div class="err-det" id="err-det"></div>
+  <button class="btn btn-o" style="max-width:280px;margin-top:.5rem" onclick="closeErr()">← Tentar novamente</button>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  ESTADO
+// ═══════════════════════════════════════════════════════
+let cvReady=false, stream=null, captured=null;
+let ren=null, scn=null, cam=null, hg=null, animId=null, isWF=false, curView='3d';
+let orb={rotX:-.32,rotY:.4,scale:1,down:false,last:{x:0,y:0},pinchDist:0};
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+function onCVReady(){cvReady=true;console.log('OpenCV ready');}
+const on=id=>document.getElementById(id).classList.add('on');
+const off=id=>document.getElementById(id).classList.remove('on');
+const el=id=>document.getElementById(id);
+function showTips(){on('tips-view');}
+function hideTips(){off('tips-view');}
+function showErr(msg,det){el('err-msg').textContent=msg;el('err-det').textContent=det||'';on('err-view');}
+function closeErr(){off('err-view');}
+
+function goBack(){
+  stopStream();
+  ['cam-view','cam-hud','cap-area','scan-pulse','preview-view','prog-view','view3d'].forEach(off);
+  off('back-btn');
+  if(animId){cancelAnimationFrame(animId);animId=null;}
+  el('splash').style.display='flex';
+}
+function goBackCam(){off('view3d');if(animId){cancelAnimationFrame(animId);animId=null;}startCam();}
+
+// ═══════════════════════════════════════════════════════
+//  CÂMERA
+// ═══════════════════════════════════════════════════════
+async function startCam(){
+  el('splash').style.display='none';
+  off('preview-view');off('view3d');
+  const tries=[
+    {video:{facingMode:{exact:'environment'},width:{ideal:1920},height:{ideal:1080}}},
+    {video:{facingMode:'environment',width:{ideal:1280},height:{ideal:960}}},
+    {video:{facingMode:'environment'}},
+    {video:{width:{ideal:1280},height:{ideal:720}}},
+    {video:true}
+  ];
+  let s=null,lastErr=null;
+  for(const c of tries){try{s=await navigator.mediaDevices.getUserMedia(c);break;}catch(e){lastErr=e;}}
+  if(!s){
+    let msg='Não foi possível aceder à câmera.',det=lastErr?.name+': '+lastErr?.message;
+    if(lastErr?.name==='NotAllowedError'){msg='Permissão negada.';det='Toca no cadeado → Permitir câmera → Recarrega.';}
+    else if(location.protocol!=='https:'&&!['localhost','127.0.0.1'].includes(location.hostname)){
+      msg='Requer HTTPS.';det='Usa GitHub Pages, Netlify ou VS Code Live Server.';}
+    showErr(msg,det);el('splash').style.display='flex';return;
+  }
+  stream=s;
+  const v=el('video');v.srcObject=s;await v.play();
+  on('cam-view');on('cam-hud');on('cap-area');on('scan-pulse');on('back-btn');
+  if(!cvReady){
+    el('cv-loading').style.display='flex';
+    el('cap-btn').style.opacity='.4';
+    el('cam-status-txt').textContent='A carregar OpenCV...';
+    await waitCV();
+    el('cv-loading').style.display='none';
+    el('cap-btn').style.opacity='1';
+    el('cam-status-txt').textContent='Câmera ativa';
+  }
+}
+function stopStream(){if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
+  const v=el('video');v.pause();v.srcObject=null;}
+function waitCV(){return new Promise(r=>{if(cvReady){r();return;}const t=setInterval(()=>{if(cvReady){clearInterval(t);r();}},200);});}
+
+function captureFrame(){
+  const v=el('video');
+  if(!v.videoWidth)return;
+  const pc=el('preview-canvas');
+  pc.width=v.videoWidth;pc.height=v.videoHeight;
+  const ctx=pc.getContext('2d');
+  ctx.drawImage(v,0,0);
+  captured=ctx.getImageData(0,0,pc.width,pc.height);
+  stopStream();
+  off('cam-view');off('cam-hud');off('cap-area');off('scan-pulse');
+  on('preview-view');
+  el('prev-quality').innerHTML=`Capturado: <strong>${v.videoWidth}×${v.videoHeight}px</strong>. Planta nítida e enquadrada?`;
+}
+function retake(){off('preview-view');captured=null;startCam();}
+
+// ═══════════════════════════════════════════════════════
+//  PIPELINE DE ANÁLISE — v2 (melhorado, 3D fiel ao original)
+// ═══════════════════════════════════════════════════════
+const STEPS=[
+  'Converter para escala de cinza',
+  'Melhorar contraste (CLAHE)',
+  'Remover ruído (Gaussian blur)',
+  'Binarização adaptativa (Otsu)',
+  'Isolar linhas estruturais H+V',
+  'Fechar paredes duplas + esqueleto',
+  'HoughLinesP sobre o esqueleto',
+  'Snap H/V + filtro de comprimento',
+  'Merge colinear + filtro anti-mobília',
+  'Normalizar + construir modelo 3D'
+];
+
+function setProgress(i,msg){
+  el('prog-fill').style.width=((i+1)/STEPS.length*100)+'%';
+  el('prog-msg').textContent=msg||STEPS[i]||'';
+  const start=Math.max(0,i-1);
+  el('prog-list').innerHTML=STEPS.slice(start,start+4).map((s,j)=>{
+    const idx=start+j;
+    const cls=idx<i?'done':idx===i?'active':'';
+    return`<div class="p-item ${cls}"><div class="p-dot"></div>${s}</div>`;
+  }).join('');
+}
+
+async function processImage(){
+  if(!captured)return;
+  if(!cvReady){showErr('OpenCV não carregou','Aguarda e tenta novamente.');return;}
+  off('preview-view');on('prog-view');
+  await sleep(60);
+  try{
+    const result=await runPipeline(captured);
+    setProgress(9,'A construir modelo 3D...');
+    await sleep(150);
+    off('prog-view');
+    build3D(result);
+  }catch(e){
+    off('prog-view');
+    console.error(e);
+    showErr('Erro ao processar a planta',e.message||String(e));
+  }
+}
+
+async function runPipeline(imgData){
+  const IW=imgData.width, IH=imgData.height;
+  const cvC=el('cv-canvas');
+  cvC.width=IW;cvC.height=IH;
+  cvC.getContext('2d').putImageData(imgData,0,0);
+
+  // Resolução aumentada para 1200px — melhor precisão de deteção
+  const maxSide=1200;
+  const sc=Math.min(1,maxSide/Math.max(IW,IH));
+  const PW=Math.round(IW*sc), PH=Math.round(IH*sc);
+  const minDim=Math.min(PW,PH);
+
+  // ── 0: Escala de cinza
+  setProgress(0);await sleep(25);
+  let src=cv.imread(cvC);
+  let gray=new cv.Mat();
+  cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);
+  src.delete();
+  if(sc<1){let r=new cv.Mat();cv.resize(gray,r,new cv.Size(PW,PH));gray.delete();gray=r;}
+
+  // ── 1: CLAHE — melhora contraste local
+  // Essencial para plantas com iluminação não-uniforme ou baixo contraste
+  setProgress(1,'Melhorar contraste (CLAHE)...');await sleep(25);
+  let enhanced=new cv.Mat();
+  const clahe=new cv.CLAHE(2.5,new cv.Size(8,8));
+  clahe.apply(gray,enhanced);
+  clahe.delete();gray.delete();
+
+  // ── 2: Gaussian blur leve — remove ruído de impressão e artefactos digitais
+  setProgress(2,'Remover ruído...');await sleep(20);
+  let blurred=new cv.Mat();
+  cv.GaussianBlur(enhanced,blurred,new cv.Size(3,3),0.7);
+  enhanced.delete();
+
+  // ── 3: Binarização Otsu — adaptativa ao histograma da imagem
+  setProgress(3);await sleep(20);
+  let bin=new cv.Mat();
+  cv.threshold(blurred,bin,0,255,cv.THRESH_BINARY_INV+cv.THRESH_OTSU);
+  blurred.delete();
+
+  // Abertura morfológica 3x3 para eliminar ruído pontual
+  // Remove pixels isolados de texto, texturas de mobília e artefactos de câmera
+  const kNoise=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(3,3));
+  let binClean=new cv.Mat();
+  cv.morphologyEx(bin,binClean,cv.MORPH_OPEN,kNoise);
+  kNoise.delete();bin.delete();
+
+  // ── 4: Isolar linhas estruturais longas H e V
+  // Comprimento mínimo: 7% do lado menor — exclui linhas de mobília (curtas e isoladas)
+  setProgress(4);await sleep(25);
+  const structMinPx=Math.round(minDim*0.07);
+  const kh=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(structMinPx,1));
+  const kv=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(1,structMinPx));
+  let horiz=new cv.Mat(),vert=new cv.Mat();
+  cv.morphologyEx(binClean,horiz,cv.MORPH_OPEN,kh);
+  cv.morphologyEx(binClean,vert,cv.MORPH_OPEN,kv);
+  kh.delete();kv.delete();
+  let walls=new cv.Mat();
+  cv.bitwise_or(horiz,vert,walls);
+  horiz.delete();vert.delete();binClean.delete();
+
+  // ── 5: Fechar paredes duplas + esqueleto
+  // Paredes arquitetónicas têm espessura real — dilatar fecha o gap entre as duas linhas
+  setProgress(5,'Fechar paredes duplas...');await sleep(20);
+  const gapClose=Math.round(minDim*0.022);
+  const kd=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(gapClose,gapClose));
+  let wallsClosed=new cv.Mat();
+  cv.dilate(walls,wallsClosed,kd);
+  kd.delete();
+  // Erosão controlada — não engrossar excessivamente
+  const erodeAmt=Math.max(1,Math.round(gapClose*0.45));
+  const ke=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(erodeAmt,erodeAmt));
+  let wallsFinal=new cv.Mat();
+  cv.erode(wallsClosed,wallsFinal,ke);
+  ke.delete();walls.delete();wallsClosed.delete();
+
+  // Esqueleto iterativo — obtém linha central de cada parede (1px de espessura)
+  const skel=await skeletonize(wallsFinal);
+  wallsFinal.delete();
+
+  // ── 6: HoughLinesP com parâmetros afinados para plantas arquitetónicas
+  setProgress(6);await sleep(20);
+  let lines=new cv.Mat();
+  // minLineLength: 3.5% — aceita paredes interiores mais curtas
+  // maxLineGap: 1.5% — permite juntar segmentos com gaps de portas/janelas
+  // acumulador: 18 — mais sensível mas ainda filtra ruído
+  const minLen=Math.round(minDim*0.035);
+  const maxGap=Math.round(minDim*0.015);
+  cv.HoughLinesP(skel,lines,1,Math.PI/180,18,minLen,maxGap);
+  skel.delete();
+  const rawCount=lines.rows;
+
+  // ── 7: Snap H/V + filtro de comprimento
+  setProgress(7);await sleep(20);
+  const snapped=[];
+  // Tolerância de snap: 13° — aceita linhas levemente inclinadas (distorção de câmera)
+  const snapTol=13;
+  // Filtro: 5.5% do lado menor — descarta linhas de texto, cotas, mobília
+  const filterLen=minDim*0.055;
+  for(let i=0;i<lines.rows;i++){
+    const[x1,y1,x2,y2]=[lines.data32S[i*4],lines.data32S[i*4+1],
+                         lines.data32S[i*4+2],lines.data32S[i*4+3]];
+    const length=Math.hypot(x2-x1,y2-y1);
+    if(length<filterLen)continue;
+    const angle=Math.abs(Math.atan2(y2-y1,x2-x1)*180/Math.PI);
+    if(angle<snapTol||(angle>180-snapTol)){
+      // Horizontal
+      const ym=Math.round((y1+y2)/2);
+      snapped.push({x1:Math.min(x1,x2),y1:ym,x2:Math.max(x1,x2),y2:ym,len:length,t:'H'});
+    }else if(angle>90-snapTol&&angle<90+snapTol){
+      // Vertical
+      const xm=Math.round((x1+x2)/2);
+      snapped.push({x1:xm,y1:Math.min(y1,y2),x2:xm,y2:Math.max(y1,y2),len:length,t:'V'});
+    }
+    // Diagonais descartadas — mobília e elementos não-estruturais
+  }
+  lines.delete();
+
+  // ── 8: Merge colinear + filtro anti-mobília
+  setProgress(8,'Merge + filtro anti-mobília...');await sleep(20);
+  // axisTol: 2% — janela de proximidade para colinearidade
+  // gapTol: 3.5% — tolera gaps de portas/janelas ao fazer merge
+  const merged=mergeColinear(snapped,minDim*0.02,minDim*0.035);
+
+  // Filtro de comprimento final — paredes estruturais são tipicamente >7% do lado menor
+  const structural=merged.filter(l=>l.len>minDim*0.07);
+
+  // Filtro de proximidade — paredes reais têm sempre paredes perpendiculares próximas
+  // Mobília fica isolada; paredes formam cantos e junções em T
+  const filtered=filterIsolatedSegments(structural,minDim*0.18);
+
+  if(filtered.length<2){
+    throw new Error(
+      `Poucas paredes detetadas (${filtered.length} de ${structural.length}).\n\n`+
+      `Sugestões: iluminação uniforme, câmera perpendicular à planta, linhas mais escuras e espessas, enquadra 80%+ do ecrã.`
+    );
+  }
+
+  // ── 9: Normalizar para espaço 3D [-5,5] × [-4,4]
+  setProgress(9);await sleep(20);
+  let xMin=Infinity,xMax=-Infinity,yMin=Infinity,yMax=-Infinity;
+  for(const w of filtered){
+    xMin=Math.min(xMin,w.x1,w.x2);xMax=Math.max(xMax,w.x1,w.x2);
+    yMin=Math.min(yMin,w.y1,w.y2);yMax=Math.max(yMax,w.y1,w.y2);
+  }
+  const nW=xMax-xMin||1,nH=yMax-yMin||1;
+  const norm=(x,y)=>({x:(x-xMin)/nW*10-5,z:(y-yMin)/nH*8-4});
+  const wallData=filtered.map(w=>({
+    x1n:norm(w.x1,w.y1).x,z1n:norm(w.x1,w.y1).z,
+    x2n:norm(w.x2,w.y2).x,z2n:norm(w.x2,w.y2).z,
+    len:w.len,t:w.t
+  }));
+
+  const rooms=estimateRooms(wallData);
+  return{walls:wallData,rooms,rawCount,wallCount:filtered.length,res:`${PW}×${PH}`};
+}
+
+// ── Filtro anti-mobília: remove segmentos muito isolados
+// Paredes estruturais têm sempre paredes perpendiculares próximas (formam cantos/T)
+// Mobília tende a ficar isolada ou com apenas vizinhos paralelos
+function filterIsolatedSegments(segs,proximity){
+  if(segs.length<=5)return segs; // poucos segmentos — manter todos
+  return segs.filter(a=>{
+    for(const b of segs){
+      if(a===b)continue;
+      if(a.t===b.t)continue; // só verifica perpendiculares (formação de canto)
+      const dists=[
+        Math.hypot(a.x1-b.x1,a.y1-b.y1),Math.hypot(a.x1-b.x2,a.y1-b.y2),
+        Math.hypot(a.x2-b.x1,a.y2-b.y1),Math.hypot(a.x2-b.x2,a.y2-b.y2)
+      ];
+      // Verifica também ponto médio — junções em T
+      const amx=(a.x1+a.x2)/2,amy=(a.y1+a.y2)/2;
+      const bmx=(b.x1+b.x2)/2,bmy=(b.y1+b.y2)/2;
+      dists.push(Math.hypot(amx-b.x1,amy-b.y1),Math.hypot(amx-b.x2,amy-b.y2));
+      dists.push(Math.hypot(a.x1-bmx,a.y1-bmy),Math.hypot(a.x2-bmx,a.y2-bmy));
+      if(Math.min(...dists)<proximity)return true;
+    }
+    return false;
+  });
+}
+
+// ── Esqueleto iterativo (Zhang-Suen via erosão morfológica)
+async function skeletonize(mat){
+  const skel=new cv.Mat.zeros(mat.rows,mat.cols,cv.CV_8UC1);
+  let temp=new cv.Mat();
+  let eroded=new cv.Mat();
+  const k=cv.getStructuringElement(cv.MORPH_CROSS,new cv.Size(3,3));
+  let img=mat.clone();
+  let done=false,itr=0;
+  while(!done&&itr<55){
+    itr++;
+    cv.erode(img,eroded,k);
+    cv.dilate(eroded,temp,k);
+    cv.subtract(img,temp,temp);
+    cv.bitwise_or(skel,temp,skel);
+    eroded.copyTo(img);
+    if(cv.countNonZero(img)===0)done=true;
+    if(itr%8===0)await sleep(4);
+  }
+  temp.delete();eroded.delete();k.delete();img.delete();
+  return skel;
+}
+
+// ── Merge de segmentos colineares próximos
+function mergeColinear(segs,axisTol,gapTol){
+  const used=new Set();
+  const out=[];
+  for(let i=0;i<segs.length;i++){
+    if(used.has(i))continue;
+    let b={...segs[i]};
+    for(let j=i+1;j<segs.length;j++){
+      if(used.has(j)||segs[j].t!==b.t)continue;
+      if(b.t==='H'){
+        if(Math.abs(b.y1-segs[j].y1)>axisTol)continue;
+        if(segs[j].x1<=b.x2+gapTol&&segs[j].x2>=b.x1-gapTol){
+          b.x1=Math.min(b.x1,segs[j].x1);b.x2=Math.max(b.x2,segs[j].x2);
+          b.len=b.x2-b.x1;used.add(j);
+        }
+      }else{
+        if(Math.abs(b.x1-segs[j].x1)>axisTol)continue;
+        if(segs[j].y1<=b.y2+gapTol&&segs[j].y2>=b.y1-gapTol){
+          b.y1=Math.min(b.y1,segs[j].y1);b.y2=Math.max(b.y2,segs[j].y2);
+          b.len=b.y2-b.y1;used.add(j);
+        }
+      }
+    }
+    out.push(b);used.add(i);
+  }
+  return out;
+}
+
+function estimateRooms(walls){
+  let ints=0;
+  for(let i=0;i<walls.length;i++)
+    for(let j=i+1;j<walls.length;j++)
+      if(segsIntersect(walls[i],walls[j]))ints++;
+  return Math.max(1,Math.round(ints/3));
+}
+function segsIntersect(a,b){
+  const cross=(p,q,r)=>(q.x-p.x)*(r.z-p.z)-(q.z-p.z)*(r.x-p.x);
+  const A={x:a.x1n,z:a.z1n},B={x:a.x2n,z:a.z2n};
+  const C={x:b.x1n,z:b.z1n},D={x:b.x2n,z:b.z2n};
+  return((cross(C,D,A)>0)!=(cross(C,D,B)>0))&&((cross(A,B,C)>0)!=(cross(A,B,D)>0));
+}
+
+// ═══════════════════════════════════════════════════════
+//  THREE.JS — MODELO 3D (idêntico ao original)
+// ═══════════════════════════════════════════════════════
+function build3D(data){
+  on('view3d');on('back-btn');
+  el('v3-info').textContent=data.wallCount+' paredes';
+  el('s-walls').textContent=data.wallCount;
+  el('s-rooms').textContent=data.rooms;
+  el('s-res').textContent=data.res;
+  el('s-raw').textContent=data.rawCount;
+
+  const canvas=el('c3d');
+  canvas.width=window.innerWidth;canvas.height=window.innerHeight;
+
+  if(!ren){
+    ren=new THREE.WebGLRenderer({canvas,antialias:true});
+    ren.setPixelRatio(Math.min(devicePixelRatio,2));
+    ren.shadowMap.enabled=true;
+    ren.shadowMap.type=THREE.PCFSoftShadowMap;
+    ren.toneMapping=THREE.ACESFilmicToneMapping;
+    ren.toneMappingExposure=1.1;
+  }
+  ren.setSize(window.innerWidth,window.innerHeight);
+  ren.setClearColor(0x0d0f14,1);
+
+  scn=new THREE.Scene();
+  scn.fog=new THREE.FogExp2(0x0d0f14,0.03);
+  cam=new THREE.PerspectiveCamera(52,window.innerWidth/window.innerHeight,0.1,200);
+  cam.position.set(0,9,13);cam.lookAt(0,0,0);
+
+  scn.add(new THREE.AmbientLight(0x6070a0,0.55));
+  const sun=new THREE.DirectionalLight(0xffeedd,1.3);
+  sun.position.set(7,12,8);sun.castShadow=true;
+  sun.shadow.mapSize.set(2048,2048);
+  ['left','right','top','bottom'].forEach((k,i)=>sun.shadow.camera[k]=[-14,14,14,-14][i]);
+  scn.add(sun);
+  const fill=new THREE.DirectionalLight(0xa0c0ff,0.35);
+  fill.position.set(-6,4,-6);scn.add(fill);
+
+  const floorMat=new THREE.MeshStandardMaterial({color:0x181b22,roughness:.95,metalness:0});
+  const floor=new THREE.Mesh(new THREE.PlaneGeometry(30,30),floorMat);
+  floor.rotation.x=-Math.PI/2;floor.position.y=-.01;floor.receiveShadow=true;scn.add(floor);
+  scn.add(new THREE.GridHelper(28,28,0x23262e,0x1a1d24));
+
+  buildWalls(data.walls);
+  setupControls(canvas);
+  orb.rotX=-.32;orb.rotY=.35;orb.scale=1;
+  set3dView('3d',false);
+  if(animId)cancelAnimationFrame(animId);
+  loop3d();
+}
+
+function buildWalls(walls){
+  if(hg&&scn)scn.remove(hg);
+  hg=new THREE.Group();
+
+  const WALL_H=2.8;
+  const WALL_T=0.14;
+
+  const mWall=new THREE.MeshStandardMaterial({color:0xd8ccb8,roughness:.82,metalness:0,side:THREE.DoubleSide});
+  const mTop=new THREE.MeshStandardMaterial({color:0xbfb59e,roughness:.9,metalness:0});
+  const mFloor=new THREE.MeshStandardMaterial({color:0x9c9080,roughness:.95,metalness:0});
+
+  let x0=Infinity,x1=-Infinity,z0=Infinity,z1=-Infinity;
+  for(const w of walls){
+    x0=Math.min(x0,w.x1n,w.x2n);x1=Math.max(x1,w.x1n,w.x2n);
+    z0=Math.min(z0,w.z1n,w.z2n);z1=Math.max(z1,w.z1n,w.z2n);
+  }
+  const pw=x1-x0,pd=z1-z0;
+  if(pw>.1&&pd>.1){
+    const piso=new THREE.Mesh(new THREE.BoxGeometry(pw+.2,.06,pd+.2),mFloor);
+    piso.position.set((x0+x1)/2,-.03,(z0+z1)/2);piso.receiveShadow=true;hg.add(piso);
+  }
+
+  for(const w of walls){
+    const dx=w.x2n-w.x1n,dz=w.z2n-w.z1n;
+    const len=Math.hypot(dx,dz);
+    if(len<.15)continue;
+    const cx=(w.x1n+w.x2n)/2,cz=(w.z1n+w.z2n)/2;
+    const angle=Math.atan2(dz,dx);
+
+    const wallMesh=new THREE.Mesh(new THREE.BoxGeometry(len+WALL_T,WALL_H,WALL_T),mWall);
+    wallMesh.position.set(cx,WALL_H/2,cz);
+    wallMesh.rotation.y=-angle;
+    wallMesh.castShadow=true;wallMesh.receiveShadow=true;
+    hg.add(wallMesh);
+
+    const topMesh=new THREE.Mesh(new THREE.BoxGeometry(len+WALL_T+.02,.05,WALL_T+.02),mTop);
+    topMesh.position.set(cx,WALL_H+.025,cz);
+    topMesh.rotation.y=-angle;topMesh.castShadow=true;hg.add(topMesh);
+
+    const edges=new THREE.EdgesGeometry(new THREE.BoxGeometry(len,WALL_H,WALL_T));
+    const edgeMesh=new THREE.LineSegments(edges,new THREE.LineBasicMaterial({color:0xc8392b,opacity:.5,transparent:true}));
+    edgeMesh.position.set(cx,WALL_H/2,cz);edgeMesh.rotation.y=-angle;
+    hg.add(edgeMesh);
+  }
+
+  if(isWF)applyWF(true);
+  scn.add(hg);
+}
+
+function applyWF(on){
+  if(!hg)return;
+  hg.traverse(m=>{if(m.isMesh&&m.material){
+    if(Array.isArray(m.material))m.material.forEach(mt=>mt.wireframe=on);
+    else m.material.wireframe=on;
+  }});
+}
+
+function loop3d(){
+  animId=requestAnimationFrame(loop3d);
+  if(!ren||!scn||!cam)return;
+  const r=12*orb.scale;
+  if(curView==='top'){
+    cam.position.set(0,16*orb.scale,.01);cam.lookAt(0,0,0);
+  }else{
+    cam.position.set(Math.sin(orb.rotY)*Math.cos(orb.rotX)*r,
+      Math.sin(orb.rotX)*r+4,
+      Math.cos(orb.rotY)*Math.cos(orb.rotX)*r);
+    cam.lookAt(0,1.5,0);
+  }
+  ren.render(scn,cam);
+}
+
+function setupControls(canvas){
+  canvas.addEventListener('touchstart',e=>{
+    if(e.touches.length===1){orb.down=true;orb.last={x:e.touches[0].clientX,y:e.touches[0].clientY};}
+    else if(e.touches.length===2)orb.pinchDist=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+    e.preventDefault();
+  },{passive:false});
+  canvas.addEventListener('touchmove',e=>{
+    if(e.touches.length===1&&orb.down&&curView!=='top'){
+      const dx=e.touches[0].clientX-orb.last.x,dy=e.touches[0].clientY-orb.last.y;
+      orb.rotY+=dx*.007;orb.rotX=Math.max(-Math.PI/2.1,Math.min(Math.PI/3,orb.rotX+dy*.006));
+      orb.last={x:e.touches[0].clientX,y:e.touches[0].clientY};
+    }else if(e.touches.length===2){
+      const d=Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
+      orb.scale=Math.max(.35,Math.min(3.5,orb.scale*orb.pinchDist/d));orb.pinchDist=d;
+    }
+    e.preventDefault();
+  },{passive:false});
+  canvas.addEventListener('touchend',()=>orb.down=false);
+  canvas.addEventListener('mousedown',e=>{orb.down=true;orb.last={x:e.clientX,y:e.clientY};});
+  canvas.addEventListener('mousemove',e=>{
+    if(!orb.down||curView==='top')return;
+    orb.rotY+=(e.clientX-orb.last.x)*.005;
+    orb.rotX=Math.max(-Math.PI/2.1,Math.min(Math.PI/3,orb.rotX+(e.clientY-orb.last.y)*.004));
+    orb.last={x:e.clientX,y:e.clientY};
+  });
+  canvas.addEventListener('mouseup',()=>orb.down=false);
+  canvas.addEventListener('wheel',e=>{orb.scale=Math.max(.35,Math.min(3.5,orb.scale*(1+e.deltaY*.001)));e.preventDefault();},{passive:false});
+}
+
+function set3dView(v,_=true){
+  curView=v;
+  document.querySelectorAll('.v3-btn').forEach(b=>b.classList.remove('on'));
+  if(v==='3d'){orb.rotX=-.32;orb.rotY=.35;orb.scale=1;el('vb-3d').classList.add('on');}
+  else if(v==='top'){el('vb-top').classList.add('on');}
+}
+function toggleWF(){isWF=!isWF;el('vb-wf').classList.toggle('on',isWF);applyWF(isWF);}
+
+window.addEventListener('resize',()=>{
+  if(ren&&cam){ren.setSize(window.innerWidth,window.innerHeight);cam.aspect=window.innerWidth/window.innerHeight;cam.updateProjectionMatrix();}
+});
+</script>
+</body>
+</html>
