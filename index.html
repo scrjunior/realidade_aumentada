@@ -2,10 +2,10 @@
 <html lang="pt">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>Plantas em Realidade Aumentada</title>
+<title>Plantas AR — Leitor Avançado</title>
 <script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
 <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onCVReady()"></script>
 <style>
@@ -84,13 +84,19 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
 /* ── PREVIEW ── */
 #preview-view{display:none;position:fixed;inset:0;background:#000;flex-direction:column}
 #preview-view.on{display:flex}
-#preview-canvas{width:100%;flex:1;object-fit:contain}
-.prev-bar{background:rgba(13,15,20,.96);padding:14px 16px 30px;display:flex;flex-direction:column;gap:10px}
+#preview-canvas{width:100%;flex:1;min-height:0;object-fit:contain}
+.prev-bar{
+  background:rgba(13,15,20,.97);
+  padding:12px 16px;
+  padding-bottom:max(16px, env(safe-area-inset-bottom, 16px));
+  display:flex;flex-direction:column;gap:10px;
+  flex-shrink:0;
+}
 .prev-title{font-family:var(--mono);font-size:10px;letter-spacing:.12em;color:var(--red);text-transform:uppercase;text-align:center}
 .prev-quality{font-size:12px;color:var(--muted);text-align:center;line-height:1.5}
 .prev-quality strong{color:var(--paper)}
 .prev-btns{display:flex;gap:8px}
-.prev-btn{flex:1;padding:12px;border-radius:2px;border:none;font-family:var(--font);font-size:13px;font-weight:500;cursor:pointer}
+.prev-btn{flex:1;padding:13px 8px;border-radius:2px;border:none;font-family:var(--font);font-size:13px;font-weight:500;cursor:pointer;min-height:48px}
 .prev-btn.go{background:var(--red);color:white}
 .prev-btn.back{background:var(--surface);border:1px solid var(--border);color:var(--paper)}
 
@@ -165,11 +171,15 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
 <div id="splash">
   <div class="sp-hero">
     <div class="sp-icon">📐</div>
-    <div class="sp-tag">Realidade Aumentada</div>
-    
+    <div class="sp-tag">Realidade Aumentade</div>
     
   </div>
-  
+  <div class="how">
+    <div class="how-item"><div class="h-n">01</div><div class="h-t">Coloca a planta numa superfície plana, com <strong>boa iluminação uniforme</strong></div></div>
+    <div class="how-item"><div class="h-n">02</div><div class="h-t">Enquadra <strong>toda a planta</strong> dentro dos cantos vermelhos no ecrã</div></div>
+    <div class="how-item"><div class="h-n">03</div><div class="h-t">Carrega no <strong>botão de captura</strong> — aguarda o foco automático terminar</div></div>
+    <div class="how-item"><div class="h-n">04</div><div class="h-t">O OpenCV analisa as paredes e gera o <strong>modelo 3D interativo</strong></div></div>
+  </div>
   <div class="btns">
     <button class="btn btn-r" onclick="startCam()">📷 Abrir Câmera</button>
     
@@ -177,19 +187,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
   
 </div>
 
-<!-- DICAS -->
-<div id="tips-view">
-  <div class="tips-title">Melhores Resultados</div>
-  <div class="tip-grid">
-    <div class="tip-card"><div class="tc-icon">💡</div><div class="tc-title">Iluminação</div><div class="tc-desc">Luz natural difusa. Sem reflexos nem sombras no papel</div></div>
-    <div class="tip-card"><div class="tc-icon">📐</div><div class="tc-title">Ângulo reto</div><div class="tc-desc">Câmera perpendicular à planta, de cima para baixo</div></div>
-    <div class="tip-card"><div class="tc-icon">🖨️</div><div class="tc-title">Impressão nítida</div><div class="tc-desc">Papel branco mate, tinta preta escura, linhas bem visíveis</div></div>
-    <div class="tip-card"><div class="tc-icon">📏</div><div class="tc-title">A4 ou maior</div><div class="tc-desc">Planta maior facilita a deteção. Ocupa 80%+ do ecrã</div></div>
-    <div class="tip-card"><div class="tc-icon">🔲</div><div class="tc-title">Paredes duplas</div><div class="tc-desc">Plantas arquitetónicas reais funcionam muito bem</div></div>
-    <div class="tip-card"><div class="tc-icon">📱</div><div class="tc-title">Estabilidade</div><div class="tc-desc">Segura firme ao capturar. Espera o foco automático</div></div>
-  </div>
-  <button class="btn btn-o" style="width:100%;max-width:360px;margin-top:.5rem" onclick="hideTips()">← Voltar</button>
-</div>
+
 
 <!-- CÂMERA -->
 <div id="cam-view">
@@ -203,11 +201,11 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
 </div>
 <div id="scan-pulse"></div>
 <div id="cam-hud">
-  <div class="ch-title">Planta em RA</div>
+  <div class="ch-title">Leitor de Plantas</div>
   <div class="ch-status" id="cam-status-badge"><div class="blink"></div><span id="cam-status-txt">Câmera ativa</span></div>
 </div>
 <div id="cap-area">
-  <div class="cap-hint">Enquadra toda a planta dentro dos cantos.</div>
+  <div class="cap-hint">Enquadra toda a planta dentro dos cantos.<br>Espera o foco e carrega para capturar.</div>
   <button class="cap-btn" id="cap-btn" onclick="captureFrame()" title="Capturar"></button>
   <div class="cv-loading" id="cv-loading" style="display:none">
     <div class="blink" style="background:var(--amber)"></div>
