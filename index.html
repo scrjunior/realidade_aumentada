@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>Plantas em Realidade Aumentada</title>
+<title>Plantas AR — Leitor Avançado</title>
 <script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
 <script async src="https://docs.opencv.org/4.8.0/opencv.js" onload="onCVReady()"></script>
 <style>
@@ -171,15 +171,21 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
 <div id="splash">
   <div class="sp-hero">
     <div class="sp-icon">📐</div>
-    <div class="sp-tag">Realidade Aumentada</div>
-    
+    <div class="sp-tag">Leitor de Plantas AR v2</div>
+    <div class="sp-title">Planta 2D → Estrutura 3D</div>
+    <div class="sp-sub">Aponta a câmera para qualquer planta impressa. O algoritmo deteta as paredes e reconstrói a estrutura em 3D — 100% offline.</div>
   </div>
-  
+  <div class="how">
+    <div class="how-item"><div class="h-n">01</div><div class="h-t">Coloca a planta numa superfície plana, com <strong>boa iluminação uniforme</strong></div></div>
+    <div class="how-item"><div class="h-n">02</div><div class="h-t">Enquadra <strong>toda a planta</strong> dentro dos cantos vermelhos no ecrã</div></div>
+    <div class="how-item"><div class="h-n">03</div><div class="h-t">Carrega no <strong>botão de captura</strong> — aguarda o foco automático terminar</div></div>
+    <div class="how-item"><div class="h-n">04</div><div class="h-t">O OpenCV analisa as paredes e gera o <strong>modelo 3D interativo</strong></div></div>
+  </div>
   <div class="btns">
     <button class="btn btn-r" onclick="startCam()">📷 Abrir Câmera</button>
-    
+    <button class="btn btn-o" onclick="showTips()">💡 Dicas para melhor resultado</button>
   </div>
- 
+  <p class="note-txt">Funciona offline após carregar. Requer HTTPS ou localhost. OpenCV (~8 MB) carrega uma vez.</p>
 </div>
 
 <!-- DICAS -->
@@ -216,7 +222,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
   <button class="cap-btn" id="cap-btn" onclick="captureFrame()" title="Capturar"></button>
   <div class="cv-loading" id="cv-loading" style="display:none">
     <div class="blink" style="background:var(--amber)"></div>
-    <span>A carregar...</span>
+    <span>A carregar OpenCV...</span>
   </div>
 </div>
 
@@ -698,7 +704,10 @@ function build3D(data){
   loop3d();
 }
 
+let lastWalls=[];
+
 function buildWalls(walls){
+  lastWalls=walls;
   if(hg&&scn)scn.remove(hg);
   hg=new THREE.Group();
 
@@ -743,16 +752,72 @@ function buildWalls(walls){
     hg.add(edgeMesh);
   }
 
-  if(isWF)applyWF(true);
+  if(isWF)applyPillarView(true,walls);
   scn.add(hg);
 }
 
-function applyWF(on){
+// Grupo separado só para os pilares — criado/destruído ao toggle
+let pillarGroup=null;
+
+function applyPillarView(show,walls){
   if(!hg)return;
-  hg.traverse(m=>{if(m.isMesh&&m.material){
-    if(Array.isArray(m.material))m.material.forEach(mt=>mt.wireframe=on);
-    else m.material.wireframe=on;
-  }});
+  // Mostrar/ocultar paredes
+  hg.traverse(m=>{if(m.isMesh||m.isLineSegments){m.visible=!show;}});
+
+  if(show){
+    if(pillarGroup){scn.remove(pillarGroup);pillarGroup=null;}
+    pillarGroup=new THREE.Group();
+
+    const WALL_H=2.8;
+    const PILLAR_R=0.12;
+    const mPillar=new THREE.MeshStandardMaterial({color:0xc8392b,roughness:.5,metalness:.1});
+
+    // Recolher todos os pontos de extremidade e interseção
+    const pts=[];
+    for(const w of walls){
+      pts.push({x:w.x1n,z:w.z1n});
+      pts.push({x:w.x2n,z:w.z2n});
+    }
+    // Detetar interseções entre segmentos perpendiculares
+    for(let i=0;i<walls.length;i++){
+      for(let j=i+1;j<walls.length;j++){
+        const a=walls[i],b=walls[j];
+        if(a.t===b.t)continue; // só H×V
+        let ix,iz;
+        if(a.t==='H'&&b.t==='V'){
+          ix=b.x1n; iz=a.z1n;
+          // Verificar se o ponto está dentro dos dois segmentos (com margem)
+          const onA=ix>=Math.min(a.x1n,a.x2n)-.1&&ix<=Math.max(a.x1n,a.x2n)+.1;
+          const onB=iz>=Math.min(b.z1n,b.z2n)-.1&&iz<=Math.max(b.z1n,b.z2n)+.1;
+          if(onA&&onB) pts.push({x:ix,z:iz});
+        }else if(a.t==='V'&&b.t==='H'){
+          ix=a.x1n; iz=b.z1n;
+          const onA=iz>=Math.min(a.z1n,a.z2n)-.1&&iz<=Math.max(a.z1n,a.z2n)+.1;
+          const onB=ix>=Math.min(b.x1n,b.x2n)-.1&&ix<=Math.max(b.x1n,b.x2n)+.1;
+          if(onA&&onB) pts.push({x:ix,z:iz});
+        }
+      }
+    }
+
+    // Remover duplicados próximos (raio de fusão 0.25)
+    const unique=[];
+    for(const p of pts){
+      const dup=unique.some(u=>Math.hypot(u.x-p.x,u.z-p.z)<0.25);
+      if(!dup) unique.push(p);
+    }
+
+    // Criar pilar em cada ponto
+    const geo=new THREE.CylinderGeometry(PILLAR_R,PILLAR_R,WALL_H,8);
+    for(const p of unique){
+      const mesh=new THREE.Mesh(geo,mPillar);
+      mesh.position.set(p.x,WALL_H/2,p.z);
+      mesh.castShadow=true;
+      pillarGroup.add(mesh);
+    }
+    scn.add(pillarGroup);
+  }else{
+    if(pillarGroup){scn.remove(pillarGroup);pillarGroup=null;}
+  }
 }
 
 function loop3d(){
@@ -805,7 +870,7 @@ function set3dView(v,_=true){
   if(v==='3d'){orb.rotX=-.32;orb.rotY=.35;orb.scale=1;el('vb-3d').classList.add('on');}
   else if(v==='top'){el('vb-top').classList.add('on');}
 }
-function toggleWF(){isWF=!isWF;el('vb-wf').classList.toggle('on',isWF);applyWF(isWF);}
+function toggleWF(){isWF=!isWF;el('vb-wf').classList.toggle('on',isWF);applyPillarView(isWF,lastWalls);}
 
 window.addEventListener('resize',()=>{
   if(ren&&cam){ren.setSize(window.innerWidth,window.innerHeight);cam.aspect=window.innerWidth/window.innerHeight;cam.updateProjectionMatrix();}
