@@ -769,8 +769,9 @@ function applyPillarView(show,walls){
     pillarGroup=new THREE.Group();
 
     const WALL_H=2.8;
-    const PILLAR_R=0.12;
-    const mPillar=new THREE.MeshStandardMaterial({color:0xc8392b,roughness:.5,metalness:.1});
+    const PILLAR_S=0.22; // lado do pilar quadrado
+    const mPillar=new THREE.MeshStandardMaterial({color:0xc8392b,roughness:.5,metalness:.15});
+    const mPillarTop=new THREE.MeshStandardMaterial({color:0xa02020,roughness:.4,metalness:.2});
 
     // Recolher todos os pontos de extremidade e interseção
     const pts=[];
@@ -782,15 +783,14 @@ function applyPillarView(show,walls){
     for(let i=0;i<walls.length;i++){
       for(let j=i+1;j<walls.length;j++){
         const a=walls[i],b=walls[j];
-        if(a.t===b.t)continue; // só H×V
+        if(a.t===b.t)continue;
         let ix,iz;
         if(a.t==='H'&&b.t==='V'){
           ix=b.x1n; iz=a.z1n;
-          // Verificar se o ponto está dentro dos dois segmentos (com margem)
           const onA=ix>=Math.min(a.x1n,a.x2n)-.1&&ix<=Math.max(a.x1n,a.x2n)+.1;
           const onB=iz>=Math.min(b.z1n,b.z2n)-.1&&iz<=Math.max(b.z1n,b.z2n)+.1;
           if(onA&&onB) pts.push({x:ix,z:iz});
-        }else if(a.t==='V'&&b.t==='H'){
+        }else{
           ix=a.x1n; iz=b.z1n;
           const onA=iz>=Math.min(a.z1n,a.z2n)-.1&&iz<=Math.max(a.z1n,a.z2n)+.1;
           const onB=ix>=Math.min(b.x1n,b.x2n)-.1&&ix<=Math.max(b.x1n,b.x2n)+.1;
@@ -806,14 +806,78 @@ function applyPillarView(show,walls){
       if(!dup) unique.push(p);
     }
 
-    // Criar pilar em cada ponto
-    const geo=new THREE.CylinderGeometry(PILLAR_R,PILLAR_R,WALL_H,8);
+    // ── Pilares quadrados
+    const geoBody=new THREE.BoxGeometry(PILLAR_S,WALL_H,PILLAR_S);
+    const geoTop=new THREE.BoxGeometry(PILLAR_S+.06,.05,PILLAR_S+.06);
+    const geoBase=new THREE.BoxGeometry(PILLAR_S+.06,.04,PILLAR_S+.06);
     for(const p of unique){
-      const mesh=new THREE.Mesh(geo,mPillar);
-      mesh.position.set(p.x,WALL_H/2,p.z);
-      mesh.castShadow=true;
-      pillarGroup.add(mesh);
+      // Corpo
+      const body=new THREE.Mesh(geoBody,mPillar);
+      body.position.set(p.x,WALL_H/2,p.z);
+      body.castShadow=true; body.receiveShadow=true;
+      pillarGroup.add(body);
+      // Capitel (topo)
+      const top=new THREE.Mesh(geoTop,mPillarTop);
+      top.position.set(p.x,WALL_H+.025,p.z);
+      pillarGroup.add(top);
+      // Base
+      const base=new THREE.Mesh(geoBase,mPillarTop);
+      base.position.set(p.x,.02,p.z);
+      pillarGroup.add(base);
+      // Arestas do pilar
+      const edgeGeo=new THREE.EdgesGeometry(geoBody);
+      const edgeMesh=new THREE.LineSegments(edgeGeo,new THREE.LineBasicMaterial({color:0xff6b55,opacity:.6,transparent:true}));
+      edgeMesh.position.set(p.x,WALL_H/2,p.z);
+      pillarGroup.add(edgeMesh);
     }
+
+    // ── Linhas de ligação entre pilares ao longo das paredes
+    const lineMat=new THREE.LineBasicMaterial({color:0xc8392b,opacity:.45,transparent:true});
+    const lineMat2=new THREE.LineBasicMaterial({color:0xc8392b,opacity:.25,transparent:true});
+
+    for(const w of walls){
+      // Para cada parede, encontrar todos os pilares que estão sobre ela
+      const onWall=unique.filter(p=>{
+        if(w.t==='H'){
+          const onX=p.x>=Math.min(w.x1n,w.x2n)-.15&&p.x<=Math.max(w.x1n,w.x2n)+.15;
+          const onZ=Math.abs(p.z-w.z1n)<0.3;
+          return onX&&onZ;
+        }else{
+          const onZ=p.z>=Math.min(w.z1n,w.z2n)-.15&&p.z<=Math.max(w.z1n,w.z2n)+.15;
+          const onX=Math.abs(p.x-w.x1n)<0.3;
+          return onZ&&onX;
+        }
+      });
+
+      // Ordenar ao longo da parede
+      onWall.sort((a,b)=>w.t==='H'?a.x-b.x:a.z-b.z);
+
+      // Linha ao nível do topo das paredes — ligação estrutural
+      if(onWall.length>=2){
+        for(let k=0;k<onWall.length-1;k++){
+          const a=onWall[k],b=onWall[k+1];
+          // Linha de topo
+          const gTop=new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(a.x,WALL_H,a.z),
+            new THREE.Vector3(b.x,WALL_H,b.z)
+          ]);
+          pillarGroup.add(new THREE.Line(gTop,lineMat));
+          // Linha de base
+          const gBot=new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(a.x,.04,a.z),
+            new THREE.Vector3(b.x,.04,b.z)
+          ]);
+          pillarGroup.add(new THREE.Line(gBot,lineMat2));
+          // Linha diagonal (travamento visual)
+          const gDiag=new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(a.x,.04,a.z),
+            new THREE.Vector3(b.x,WALL_H,b.z)
+          ]);
+          pillarGroup.add(new THREE.Line(gDiag,lineMat2));
+        }
+      }
+    }
+
     scn.add(pillarGroup);
   }else{
     if(pillarGroup){scn.remove(pillarGroup);pillarGroup=null;}
