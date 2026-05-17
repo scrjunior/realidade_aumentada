@@ -14,6 +14,7 @@
 :root{
   --ink:#0d0f14;--paper:#f2ede4;
   --red:#c8392b;--green:#16a34a;--amber:#d97706;
+  --earth:#8b5e3c;--stone:#6b7280;--concrete:#9ca3af;
   --surface:rgba(242,237,228,.04);--border:rgba(242,237,228,.09);
   --muted:#6b7280;--font:'DM Sans',sans-serif;--mono:'DM Mono',monospace;
 }
@@ -132,6 +133,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
   background:var(--surface);color:var(--paper);font-family:var(--font);
   font-size:11px;font-weight:500;cursor:pointer;text-align:center;transition:all .12s}
 .v3-btn.on{background:rgba(200,57,43,.12);border-color:rgba(200,57,43,.35);color:var(--red)}
+.v3-btn.on-earth{background:rgba(139,94,60,.18);border-color:rgba(139,94,60,.5);color:#c49a6c}
 .v3-btn:active{transform:scale(.96)}
 .v3-btn .ic{font-size:15px;display:block;margin-bottom:2px}
 .stats{background:var(--surface);border:1px solid var(--border);border-radius:2px;
@@ -140,6 +142,17 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
 .stat-label{font-size:10px;color:var(--muted)}
 .stat-val{font-family:var(--mono);font-size:12px;color:var(--red)}
 .touch-hint{font-size:10px;color:var(--muted);text-align:center;opacity:.7}
+
+/* ── LEGENDA FUNDAÇÃO ── */
+#found-legend{display:none;position:fixed;top:54px;right:10px;z-index:20;
+  background:rgba(13,15,20,.88);border:1px solid rgba(139,94,60,.3);
+  border-radius:2px;padding:8px 10px;min-width:130px;backdrop-filter:blur(6px)}
+#found-legend.on{display:block}
+.fl-title{font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:#c49a6c;
+  text-transform:uppercase;margin-bottom:6px}
+.fl-item{display:flex;align-items:center;gap:6px;margin-bottom:4px}
+.fl-swatch{width:10px;height:10px;border-radius:1px;flex-shrink:0}
+.fl-text{font-size:10px;color:var(--paper);opacity:.8}
 
 /* ── DICAS ── */
 #tips-view{display:none;position:fixed;inset:0;background:var(--ink);z-index:90;
@@ -173,13 +186,13 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
     <div class="sp-icon">📐</div>
     <div class="sp-tag">Leitor de Plantas AR v2</div>
     <div class="sp-title">Planta 2D → Estrutura 3D</div>
-    <div class="sp-sub">Aponta a câmera para qualquer planta impressa. O algoritmo deteta as paredes e reconstrói a estrutura em 3D — 100% offline.</div>
+    <div class="sp-sub">Aponta a câmera para qualquer planta impressa. O algoritmo deteta as paredes e reconstrói a estrutura em 3D — incluindo fundação — 100% offline.</div>
   </div>
   <div class="how">
     <div class="how-item"><div class="h-n">01</div><div class="h-t">Coloca a planta numa superfície plana, com <strong>boa iluminação uniforme</strong></div></div>
     <div class="how-item"><div class="h-n">02</div><div class="h-t">Enquadra <strong>toda a planta</strong> dentro dos cantos vermelhos no ecrã</div></div>
     <div class="how-item"><div class="h-n">03</div><div class="h-t">Carrega no <strong>botão de captura</strong> — aguarda o foco automático terminar</div></div>
-    <div class="how-item"><div class="h-n">04</div><div class="h-t">O OpenCV analisa as paredes e gera o <strong>modelo 3D interativo</strong></div></div>
+    <div class="how-item"><div class="h-n">04</div><div class="h-t">O OpenCV analisa as paredes e gera o <strong>modelo 3D + fundação interativa</strong></div></div>
   </div>
   <div class="btns">
     <button class="btn btn-r" onclick="startCam()">📷 Abrir Câmera</button>
@@ -250,7 +263,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
 <!-- 3D VIEW -->
 <div id="view3d">
   <div class="v3-hud">
-    <div class="v3-title">Estrutura 3D</div>
+    <div class="v3-title" id="v3-title-label">Estrutura 3D</div>
     <div class="v3-info" id="v3-info">—</div>
   </div>
   <canvas id="c3d"></canvas>
@@ -260,6 +273,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
       <button class="v3-btn on" id="vb-3d" onclick="set3dView('3d')"><span class="ic">🏠</span>3D</button>
       <button class="v3-btn" id="vb-top" onclick="set3dView('top')"><span class="ic">🗺️</span>Topo</button>
       <button class="v3-btn" id="vb-wf" onclick="toggleWF()"><span class="ic">⬡</span>Malha</button>
+      <button class="v3-btn" id="vb-found" onclick="toggleFoundation()"><span class="ic">🪨</span>Fundação</button>
       <button class="v3-btn" id="vb-new" onclick="goBackCam()"><span class="ic">📷</span>Nova</button>
     </div>
     <div class="stats" id="stats-box">
@@ -270,6 +284,15 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
     </div>
     <div class="touch-hint">Arrastar para rodar · Dois dedos para zoom · Vista Topo bloqueia rotação</div>
   </div>
+</div>
+
+<!-- LEGENDA FUNDAÇÃO -->
+<div id="found-legend">
+  <div class="fl-title">Fundação</div>
+  <div class="fl-item"><div class="fl-swatch" style="background:#8b5e3c"></div><div class="fl-text">Sapatas isoladas</div></div>
+  <div class="fl-item"><div class="fl-swatch" style="background:#6b4f2a"></div><div class="fl-text">Vigas de fundação</div></div>
+  <div class="fl-item"><div class="fl-swatch" style="background:#4a3520"></div><div class="fl-text">Laje de betão</div></div>
+  <div class="fl-item"><div class="fl-swatch" style="background:#2d2315"></div><div class="fl-text">Terra/solo</div></div>
 </div>
 
 <button class="back-btn" id="back-btn" onclick="goBack()">✕</button>
@@ -287,7 +310,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
 //  ESTADO
 // ═══════════════════════════════════════════════════════
 let cvReady=false, stream=null, captured=null;
-let ren=null, scn=null, cam=null, hg=null, animId=null, isWF=false, curView='3d';
+let ren=null, scn=null, cam=null, hg=null, animId=null, isWF=false, isFoundation=false, curView='3d';
 let orb={rotX:-.32,rotY:.4,scale:1,down:false,last:{x:0,y:0},pinchDist:0};
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
@@ -302,12 +325,17 @@ function closeErr(){off('err-view');}
 
 function goBack(){
   stopStream();
-  ['cam-view','cam-hud','cap-area','scan-pulse','preview-view','prog-view','view3d'].forEach(off);
+  ['cam-view','cam-hud','cap-area','scan-pulse','preview-view','prog-view','view3d','found-legend'].forEach(off);
   off('back-btn');
   if(animId){cancelAnimationFrame(animId);animId=null;}
   el('splash').style.display='flex';
 }
-function goBackCam(){off('view3d');if(animId){cancelAnimationFrame(animId);animId=null;}startCam();}
+function goBackCam(){
+  off('view3d');off('found-legend');
+  if(animId){cancelAnimationFrame(animId);animId=null;}
+  isFoundation=false;isWF=false;
+  startCam();
+}
 
 // ═══════════════════════════════════════════════════════
 //  CÂMERA
@@ -364,7 +392,7 @@ function captureFrame(){
 function retake(){off('preview-view');captured=null;startCam();}
 
 // ═══════════════════════════════════════════════════════
-//  PIPELINE DE ANÁLISE — v2 (melhorado, 3D fiel ao original)
+//  PIPELINE DE ANÁLISE
 // ═══════════════════════════════════════════════════════
 const STEPS=[
   'Converter para escala de cinza',
@@ -414,13 +442,11 @@ async function runPipeline(imgData){
   cvC.width=IW;cvC.height=IH;
   cvC.getContext('2d').putImageData(imgData,0,0);
 
-  // Resolução aumentada para 1200px — melhor precisão de deteção
   const maxSide=1200;
   const sc=Math.min(1,maxSide/Math.max(IW,IH));
   const PW=Math.round(IW*sc), PH=Math.round(IH*sc);
   const minDim=Math.min(PW,PH);
 
-  // ── 0: Escala de cinza
   setProgress(0);await sleep(25);
   let src=cv.imread(cvC);
   let gray=new cv.Mat();
@@ -428,35 +454,27 @@ async function runPipeline(imgData){
   src.delete();
   if(sc<1){let r=new cv.Mat();cv.resize(gray,r,new cv.Size(PW,PH));gray.delete();gray=r;}
 
-  // ── 1: CLAHE — melhora contraste local
-  // Essencial para plantas com iluminação não-uniforme ou baixo contraste
   setProgress(1,'Melhorar contraste (CLAHE)...');await sleep(25);
   let enhanced=new cv.Mat();
   const clahe=new cv.CLAHE(3.0,new cv.Size(6,6));
   clahe.apply(gray,enhanced);
   clahe.delete();gray.delete();
 
-  // ── 2: Gaussian blur leve — remove ruído de impressão e artefactos digitais
   setProgress(2,'Remover ruído...');await sleep(20);
   let blurred=new cv.Mat();
   cv.GaussianBlur(enhanced,blurred,new cv.Size(5,5),0.8);
   enhanced.delete();
 
-  // ── 3: Binarização Otsu — adaptativa ao histograma da imagem
   setProgress(3);await sleep(20);
   let bin=new cv.Mat();
   cv.threshold(blurred,bin,0,255,cv.THRESH_BINARY_INV+cv.THRESH_OTSU);
   blurred.delete();
 
-  // Abertura morfológica 3x3 para eliminar ruído pontual
-  // Remove pixels isolados de texto, texturas de mobília e artefactos de câmera
   const kNoise=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(3,3));
   let binClean=new cv.Mat();
   cv.morphologyEx(bin,binClean,cv.MORPH_OPEN,kNoise);
   kNoise.delete();bin.delete();
 
-  // ── 4: Isolar linhas estruturais longas H e V
-  // Comprimento mínimo: 7% do lado menor — exclui linhas de mobília (curtas e isoladas)
   setProgress(4);await sleep(25);
   const structMinPx=Math.round(minDim*0.06);
   const kh=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(structMinPx,1));
@@ -469,43 +487,32 @@ async function runPipeline(imgData){
   cv.bitwise_or(horiz,vert,walls);
   horiz.delete();vert.delete();binClean.delete();
 
-  // ── 5: Fechar paredes duplas + esqueleto
-  // Paredes arquitetónicas têm espessura real — dilatar fecha o gap entre as duas linhas
   setProgress(5,'Fechar paredes duplas...');await sleep(20);
   const gapClose=Math.round(minDim*0.026);
   const kd=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(gapClose,gapClose));
   let wallsClosed=new cv.Mat();
   cv.dilate(walls,wallsClosed,kd);
   kd.delete();
-  // Erosão controlada — não engrossar excessivamente
   const erodeAmt=Math.max(1,Math.round(gapClose*0.4));
   const ke=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(erodeAmt,erodeAmt));
   let wallsFinal=new cv.Mat();
   cv.erode(wallsClosed,wallsFinal,ke);
   ke.delete();walls.delete();wallsClosed.delete();
 
-  // Esqueleto iterativo — obtém linha central de cada parede (1px de espessura)
   const skel=await skeletonize(wallsFinal);
   wallsFinal.delete();
 
-  // ── 6: HoughLinesP com parâmetros afinados para plantas arquitetónicas
   setProgress(6);await sleep(20);
   let lines=new cv.Mat();
-  // minLineLength: 3.5% — aceita paredes interiores mais curtas
-  // maxLineGap: 1.5% — permite juntar segmentos com gaps de portas/janelas
-  // acumulador: 18 — mais sensível mas ainda filtra ruído
   const minLen=Math.round(minDim*0.03);
   const maxGap=Math.round(minDim*0.018);
   cv.HoughLinesP(skel,lines,1,Math.PI/180,15,minLen,maxGap);
   skel.delete();
   const rawCount=lines.rows;
 
-  // ── 7: Snap H/V + filtro de comprimento
   setProgress(7);await sleep(20);
   const snapped=[];
-  // Tolerância de snap: 13° — aceita linhas levemente inclinadas (distorção de câmera)
   const snapTol=12;
-  // Filtro: 5% do lado menor — descarta linhas de texto, cotas, mobília
   const filterLen=minDim*0.05;
   for(let i=0;i<lines.rows;i++){
     const[x1,y1,x2,y2]=[lines.data32S[i*4],lines.data32S[i*4+1],
@@ -514,28 +521,18 @@ async function runPipeline(imgData){
     if(length<filterLen)continue;
     const angle=Math.abs(Math.atan2(y2-y1,x2-x1)*180/Math.PI);
     if(angle<snapTol||(angle>180-snapTol)){
-      // Horizontal
       const ym=Math.round((y1+y2)/2);
       snapped.push({x1:Math.min(x1,x2),y1:ym,x2:Math.max(x1,x2),y2:ym,len:length,t:'H'});
     }else if(angle>90-snapTol&&angle<90+snapTol){
-      // Vertical
       const xm=Math.round((x1+x2)/2);
       snapped.push({x1:xm,y1:Math.min(y1,y2),x2:xm,y2:Math.max(y1,y2),len:length,t:'V'});
     }
-    // Diagonais descartadas — mobília e elementos não-estruturais
   }
   lines.delete();
 
-  // ── 8: Merge colinear + filtro anti-mobília
   setProgress(8,'Merge + filtro anti-mobília...');await sleep(20);
-  // axisTol: 1.8% — janela de proximidade para colinearidade (mais preciso)
-  // gapTol: 4% — tolera gaps maiores de portas/janelas ao fazer merge
   const merged=mergeColinear(snapped,minDim*0.018,minDim*0.04);
-
-  // Filtro de comprimento final — paredes estruturais são tipicamente >6.5% do lado menor
   const structural=merged.filter(l=>l.len>minDim*0.065);
-
-  // Filtro de proximidade — paredes reais têm sempre paredes perpendiculares próximas
   const filtered=filterIsolatedSegments(structural,minDim*0.2);
 
   if(filtered.length<2){
@@ -545,7 +542,6 @@ async function runPipeline(imgData){
     );
   }
 
-  // ── 9: Normalizar para espaço 3D [-5,5] × [-4,4]
   setProgress(9);await sleep(20);
   let xMin=Infinity,xMax=-Infinity,yMin=Infinity,yMax=-Infinity;
   for(const w of filtered){
@@ -564,20 +560,16 @@ async function runPipeline(imgData){
   return{walls:wallData,rooms,rawCount,wallCount:filtered.length,res:`${PW}×${PH}`};
 }
 
-// ── Filtro anti-mobília: remove segmentos muito isolados
-// Paredes estruturais têm sempre paredes perpendiculares próximas (formam cantos/T)
-// Mobília tende a ficar isolada ou com apenas vizinhos paralelos
 function filterIsolatedSegments(segs,proximity){
-  if(segs.length<=5)return segs; // poucos segmentos — manter todos
+  if(segs.length<=5)return segs;
   return segs.filter(a=>{
     for(const b of segs){
       if(a===b)continue;
-      if(a.t===b.t)continue; // só verifica perpendiculares (formação de canto)
+      if(a.t===b.t)continue;
       const dists=[
         Math.hypot(a.x1-b.x1,a.y1-b.y1),Math.hypot(a.x1-b.x2,a.y1-b.y2),
         Math.hypot(a.x2-b.x1,a.y2-b.y1),Math.hypot(a.x2-b.x2,a.y2-b.y2)
       ];
-      // Verifica também ponto médio — junções em T
       const amx=(a.x1+a.x2)/2,amy=(a.y1+a.y2)/2;
       const bmx=(b.x1+b.x2)/2,bmy=(b.y1+b.y2)/2;
       dists.push(Math.hypot(amx-b.x1,amy-b.y1),Math.hypot(amx-b.x2,amy-b.y2));
@@ -588,7 +580,6 @@ function filterIsolatedSegments(segs,proximity){
   });
 }
 
-// ── Esqueleto iterativo (Zhang-Suen via erosão morfológica)
 async function skeletonize(mat){
   const skel=new cv.Mat.zeros(mat.rows,mat.cols,cv.CV_8UC1);
   let temp=new cv.Mat();
@@ -610,7 +601,6 @@ async function skeletonize(mat){
   return skel;
 }
 
-// ── Merge de segmentos colineares próximos
 function mergeColinear(segs,axisTol,gapTol){
   const used=new Set();
   const out=[];
@@ -653,15 +643,21 @@ function segsIntersect(a,b){
 }
 
 // ═══════════════════════════════════════════════════════
-//  THREE.JS — MODELO 3D (idêntico ao original)
+//  THREE.JS — MODELO 3D
 // ═══════════════════════════════════════════════════════
 function build3D(data){
   on('view3d');on('back-btn');
   el('v3-info').textContent=data.wallCount+' paredes';
+  el('v3-title-label').textContent='Estrutura 3D';
   el('s-walls').textContent=data.wallCount;
   el('s-rooms').textContent=data.rooms;
   el('s-res').textContent=data.res;
   el('s-raw').textContent=data.rawCount;
+
+  // reset state
+  isFoundation=false;isWF=false;
+  el('vb-found').classList.remove('on','on-earth');
+  el('vb-wf').classList.remove('on');
 
   const canvas=el('c3d');
   canvas.width=window.innerWidth;canvas.height=window.innerHeight;
@@ -756,12 +752,233 @@ function buildWalls(walls){
   scn.add(hg);
 }
 
-// Grupo separado só para os pilares — criado/destruído ao toggle
+// ─────────────────────────────────────────────────────
+//  VISTA DE FUNDAÇÃO
+// ─────────────────────────────────────────────────────
+let foundationGroup=null;
+
+function buildFoundationView(walls){
+  if(foundationGroup){scn.remove(foundationGroup);foundationGroup=null;}
+  foundationGroup=new THREE.Group();
+
+  // Calcular bounds
+  let x0=Infinity,x1=-Infinity,z0=Infinity,z1=-Infinity;
+  for(const w of walls){
+    x0=Math.min(x0,w.x1n,w.x2n);x1=Math.max(x1,w.x1n,w.x2n);
+    z0=Math.min(z0,w.z1n,w.z2n);z1=Math.max(z1,w.z1n,w.z2n);
+  }
+  const cx=(x0+x1)/2, cz=(z0+z1)/2;
+  const pw=x1-x0+1.2, pd=z1-z0+1.2;
+
+  // ── Camada de terra (solo natural)
+  const mSolo=new THREE.MeshStandardMaterial({color:0x2d2315,roughness:1,metalness:0});
+  const solo=new THREE.Mesh(new THREE.BoxGeometry(pw+3,1.2,pd+3),mSolo);
+  solo.position.set(cx,-1.8,cz);
+  solo.receiveShadow=true;
+  foundationGroup.add(solo);
+
+  // Grid no topo da terra
+  const gridSolo=new THREE.GridHelper(Math.max(pw,pd)+3,12,0x4a3520,0x3a2a18);
+  gridSolo.position.set(cx,-1.2,cz);
+  foundationGroup.add(gridSolo);
+
+  // ── Laje de betão (radier/laje de fundação)
+  const mBetao=new THREE.MeshStandardMaterial({color:0x4a4a3e,roughness:.9,metalness:.05});
+  const laje=new THREE.Mesh(new THREE.BoxGeometry(pw,0.3,pd),mBetao);
+  laje.position.set(cx,-0.95,cz);
+  laje.castShadow=true;laje.receiveShadow=true;
+  foundationGroup.add(laje);
+
+  // Arestas da laje
+  const lajeEdge=new THREE.EdgesGeometry(new THREE.BoxGeometry(pw,0.3,pd));
+  const lajeEdgeMesh=new THREE.LineSegments(lajeEdge,
+    new THREE.LineBasicMaterial({color:0x8a8a70,opacity:.5,transparent:true}));
+  lajeEdgeMesh.position.set(cx,-0.95,cz);
+  foundationGroup.add(lajeEdgeMesh);
+
+  // ── Vigas de fundação ao longo de cada parede
+  const mViga=new THREE.MeshStandardMaterial({color:0x6b4f2a,roughness:.85,metalness:.08});
+  const mVigaEdge=new THREE.LineBasicMaterial({color:0xb8966e,opacity:.6,transparent:true});
+  const VIGA_H=0.6; // altura da viga abaixo da laje
+  const VIGA_W=0.32; // largura da viga
+
+  for(const w of walls){
+    const dx=w.x2n-w.x1n, dz=w.z2n-w.z1n;
+    const len=Math.hypot(dx,dz);
+    if(len<.15)continue;
+    const wcx=(w.x1n+w.x2n)/2, wcz=(w.z1n+w.z2n)/2;
+    const angle=Math.atan2(dz,dx);
+
+    const vigaMesh=new THREE.Mesh(
+      new THREE.BoxGeometry(len+VIGA_W,VIGA_H,VIGA_W),mViga);
+    vigaMesh.position.set(wcx,-1.1,wcz); // embutida na laje e desce
+    vigaMesh.rotation.y=-angle;
+    vigaMesh.castShadow=true;vigaMesh.receiveShadow=true;
+    foundationGroup.add(vigaMesh);
+
+    // Arestas da viga
+    const ve=new THREE.EdgesGeometry(new THREE.BoxGeometry(len+VIGA_W,VIGA_H,VIGA_W));
+    const vem=new THREE.LineSegments(ve,mVigaEdge);
+    vem.position.set(wcx,-1.1,wcz);
+    vem.rotation.y=-angle;
+    foundationGroup.add(vem);
+  }
+
+  // ── Sapatas isoladas nos pontos de encontro das paredes
+  const mSapata=new THREE.MeshStandardMaterial({color:0x8b5e3c,roughness:.75,metalness:.1});
+  const mSapataTop=new THREE.MeshStandardMaterial({color:0xa07040,roughness:.7,metalness:.12});
+  const mSapataEdge=new THREE.LineBasicMaterial({color:0xd4a070,opacity:.7,transparent:true});
+
+  // Recolher pontos de interseção e extremidades
+  const pts=[];
+  for(const w of walls){
+    pts.push({x:w.x1n,z:w.z1n});
+    pts.push({x:w.x2n,z:w.z2n});
+  }
+  // Interseções perpendiculares
+  for(let i=0;i<walls.length;i++){
+    for(let j=i+1;j<walls.length;j++){
+      const a=walls[i],b=walls[j];
+      if(a.t===b.t)continue;
+      let ix,iz;
+      if(a.t==='H'&&b.t==='V'){
+        ix=b.x1n;iz=a.z1n;
+        const onA=ix>=Math.min(a.x1n,a.x2n)-.1&&ix<=Math.max(a.x1n,a.x2n)+.1;
+        const onB=iz>=Math.min(b.z1n,b.z2n)-.1&&iz<=Math.max(b.z1n,b.z2n)+.1;
+        if(onA&&onB)pts.push({x:ix,z:iz});
+      }else{
+        ix=a.x1n;iz=b.z1n;
+        const onA=iz>=Math.min(a.z1n,a.z2n)-.1&&iz<=Math.max(a.z1n,a.z2n)+.1;
+        const onB=ix>=Math.min(b.x1n,b.x2n)-.1&&ix<=Math.max(b.x1n,b.x2n)+.1;
+        if(onA&&onB)pts.push({x:ix,z:iz});
+      }
+    }
+  }
+  // Deduplicar
+  const unique=[];
+  for(const p of pts){
+    if(!unique.some(u=>Math.hypot(u.x-p.x,u.z-p.z)<0.25))unique.push(p);
+  }
+
+  // Sapatas: caixão escalonado (base larga + topo estreito)
+  const SAPATA_BASE=0.85, SAPATA_TOP_W=0.42, SAPATA_H_BOT=0.35, SAPATA_H_TOP=0.25;
+  for(const p of unique){
+    // Base da sapata (mais larga, fundo)
+    const base=new THREE.Mesh(
+      new THREE.BoxGeometry(SAPATA_BASE,SAPATA_H_BOT,SAPATA_BASE),mSapata);
+    base.position.set(p.x,-1.45,p.z);
+    base.castShadow=true;base.receiveShadow=true;
+    foundationGroup.add(base);
+
+    // Topo da sapata (mais estreito, encontra a laje)
+    const top=new THREE.Mesh(
+      new THREE.BoxGeometry(SAPATA_TOP_W,SAPATA_H_TOP,SAPATA_TOP_W),mSapataTop);
+    top.position.set(p.x,-1.025,p.z);
+    top.castShadow=true;
+    foundationGroup.add(top);
+
+    // Arestas da sapata
+    const se=new THREE.EdgesGeometry(new THREE.BoxGeometry(SAPATA_BASE,SAPATA_H_BOT,SAPATA_BASE));
+    const sem=new THREE.LineSegments(se,mSapataEdge);
+    sem.position.set(p.x,-1.45,p.z);
+    foundationGroup.add(sem);
+
+    // Armação simulada (cruz no topo da sapata — detalhe visual)
+    const armMat=new THREE.LineBasicMaterial({color:0xe08040,opacity:.5,transparent:true});
+    const hs=SAPATA_BASE*.4;
+    const armH=new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(p.x-hs,-1.27,p.z),
+      new THREE.Vector3(p.x+hs,-1.27,p.z)
+    ]);
+    foundationGroup.add(new THREE.Line(armH,armMat));
+    const armV=new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(p.x,-1.27,p.z-hs),
+      new THREE.Vector3(p.x,-1.27,p.z+hs)
+    ]);
+    foundationGroup.add(new THREE.Line(armV,armMat));
+  }
+
+  // ── Linhas de armação longitudinal nas vigas (detalhe visual)
+  const armLongMat=new THREE.LineBasicMaterial({color:0xd4924e,opacity:.4,transparent:true});
+  for(const w of walls){
+    const dx=w.x2n-w.x1n, dz=w.z2n-w.z1n;
+    const len=Math.hypot(dx,dz);
+    if(len<.15)continue;
+    // 2 varões longitudinais simulados
+    const nx=dz/len*.08, nz=-dx/len*.08; // normal perpendicular
+    for(const side of[-1,1]){
+      const gArm=new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(w.x1n+nx*side,-1.0,w.z1n+nz*side),
+        new THREE.Vector3(w.x2n+nx*side,-1.0,w.z2n+nz*side)
+      ]);
+      foundationGroup.add(new THREE.Line(gArm,armLongMat));
+      const gArm2=new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(w.x1n+nx*side,-1.55,w.z1n+nz*side),
+        new THREE.Vector3(w.x2n+nx*side,-1.55,w.z2n+nz*side)
+      ]);
+      foundationGroup.add(new THREE.Line(gArm2,armLongMat));
+    }
+  }
+
+  scn.add(foundationGroup);
+}
+
+function showFoundation(walls){
+  // Esconder paredes — mostrar apenas fundação
+  if(hg)hg.visible=false;
+
+  // Câmera descer para ver fundação
+  orb.rotX=-.5;orb.rotY=.6;orb.scale=1.1;
+
+  buildFoundationView(walls);
+  el('v3-title-label').textContent='Vista Fundação';
+  el('v3-info').style.color='#c49a6c';
+  el('v3-info').style.background='rgba(139,94,60,.12)';
+  el('v3-info').style.borderColor='rgba(139,94,60,.3)';
+  el('v3-info').textContent='Fundação gerada';
+  on('found-legend');
+}
+
+function hideFoundation(){
+  if(foundationGroup){scn.remove(foundationGroup);foundationGroup=null;}
+  if(hg)hg.visible=true;
+  el('v3-title-label').textContent='Estrutura 3D';
+  el('v3-info').style.color='';
+  el('v3-info').style.background='';
+  el('v3-info').style.borderColor='';
+  el('v3-info').textContent=lastWalls.length+' paredes';
+  off('found-legend');
+  orb.rotX=-.32;orb.rotY=.35;orb.scale=1;
+}
+
+function toggleFoundation(){
+  isFoundation=!isFoundation;
+
+  // desativar malha se fundação ligada
+  if(isFoundation&&isWF){
+    isWF=false;
+    el('vb-wf').classList.remove('on');
+    applyPillarView(false,lastWalls);
+  }
+
+  el('vb-found').classList.toggle('on-earth',isFoundation);
+  el('vb-found').classList.remove('on');
+
+  if(isFoundation){
+    showFoundation(lastWalls);
+    set3dView('3d',false);
+  }else{
+    hideFoundation();
+  }
+}
+
+// ─────────────────────────────────────────────────────
+//  VISTA MALHA (pilares)
+// ─────────────────────────────────────────────────────
 let pillarGroup=null;
 
 function applyPillarView(show,walls){
   if(!hg)return;
-  // Mostrar/ocultar paredes
   hg.traverse(m=>{if(m.isMesh||m.isLineSegments){m.visible=!show;}});
 
   if(show){
@@ -769,115 +986,84 @@ function applyPillarView(show,walls){
     pillarGroup=new THREE.Group();
 
     const WALL_H=2.8;
-    const PILLAR_S=0.22; // lado do pilar quadrado
+    const PILLAR_S=0.22;
     const mPillar=new THREE.MeshStandardMaterial({color:0xc8392b,roughness:.5,metalness:.15});
     const mPillarTop=new THREE.MeshStandardMaterial({color:0xa02020,roughness:.4,metalness:.2});
 
-    // Recolher todos os pontos de extremidade e interseção
     const pts=[];
     for(const w of walls){
       pts.push({x:w.x1n,z:w.z1n});
       pts.push({x:w.x2n,z:w.z2n});
     }
-    // Detetar interseções entre segmentos perpendiculares
     for(let i=0;i<walls.length;i++){
       for(let j=i+1;j<walls.length;j++){
         const a=walls[i],b=walls[j];
         if(a.t===b.t)continue;
         let ix,iz;
         if(a.t==='H'&&b.t==='V'){
-          ix=b.x1n; iz=a.z1n;
+          ix=b.x1n;iz=a.z1n;
           const onA=ix>=Math.min(a.x1n,a.x2n)-.1&&ix<=Math.max(a.x1n,a.x2n)+.1;
           const onB=iz>=Math.min(b.z1n,b.z2n)-.1&&iz<=Math.max(b.z1n,b.z2n)+.1;
-          if(onA&&onB) pts.push({x:ix,z:iz});
+          if(onA&&onB)pts.push({x:ix,z:iz});
         }else{
-          ix=a.x1n; iz=b.z1n;
+          ix=a.x1n;iz=b.z1n;
           const onA=iz>=Math.min(a.z1n,a.z2n)-.1&&iz<=Math.max(a.z1n,a.z2n)+.1;
           const onB=ix>=Math.min(b.x1n,b.x2n)-.1&&ix<=Math.max(b.x1n,b.x2n)+.1;
-          if(onA&&onB) pts.push({x:ix,z:iz});
+          if(onA&&onB)pts.push({x:ix,z:iz});
         }
       }
     }
-
-    // Remover duplicados próximos (raio de fusão 0.25)
     const unique=[];
     for(const p of pts){
-      const dup=unique.some(u=>Math.hypot(u.x-p.x,u.z-p.z)<0.25);
-      if(!dup) unique.push(p);
+      if(!unique.some(u=>Math.hypot(u.x-p.x,u.z-p.z)<0.25))unique.push(p);
     }
 
-    // ── Pilares quadrados
     const geoBody=new THREE.BoxGeometry(PILLAR_S,WALL_H,PILLAR_S);
     const geoTop=new THREE.BoxGeometry(PILLAR_S+.06,.05,PILLAR_S+.06);
     const geoBase=new THREE.BoxGeometry(PILLAR_S+.06,.04,PILLAR_S+.06);
     for(const p of unique){
-      // Corpo
       const body=new THREE.Mesh(geoBody,mPillar);
       body.position.set(p.x,WALL_H/2,p.z);
-      body.castShadow=true; body.receiveShadow=true;
+      body.castShadow=true;body.receiveShadow=true;
       pillarGroup.add(body);
-      // Capitel (topo)
       const top=new THREE.Mesh(geoTop,mPillarTop);
       top.position.set(p.x,WALL_H+.025,p.z);
       pillarGroup.add(top);
-      // Base
       const base=new THREE.Mesh(geoBase,mPillarTop);
       base.position.set(p.x,.02,p.z);
       pillarGroup.add(base);
-      // Arestas do pilar
       const edgeGeo=new THREE.EdgesGeometry(geoBody);
       const edgeMesh=new THREE.LineSegments(edgeGeo,new THREE.LineBasicMaterial({color:0xff6b55,opacity:.6,transparent:true}));
       edgeMesh.position.set(p.x,WALL_H/2,p.z);
       pillarGroup.add(edgeMesh);
     }
 
-    // ── Linhas de ligação entre pilares ao longo das paredes
     const lineMat=new THREE.LineBasicMaterial({color:0xc8392b,opacity:.45,transparent:true});
     const lineMat2=new THREE.LineBasicMaterial({color:0xc8392b,opacity:.25,transparent:true});
-
     for(const w of walls){
-      // Para cada parede, encontrar todos os pilares que estão sobre ela
       const onWall=unique.filter(p=>{
         if(w.t==='H'){
-          const onX=p.x>=Math.min(w.x1n,w.x2n)-.15&&p.x<=Math.max(w.x1n,w.x2n)+.15;
-          const onZ=Math.abs(p.z-w.z1n)<0.3;
-          return onX&&onZ;
+          return p.x>=Math.min(w.x1n,w.x2n)-.15&&p.x<=Math.max(w.x1n,w.x2n)+.15&&Math.abs(p.z-w.z1n)<0.3;
         }else{
-          const onZ=p.z>=Math.min(w.z1n,w.z2n)-.15&&p.z<=Math.max(w.z1n,w.z2n)+.15;
-          const onX=Math.abs(p.x-w.x1n)<0.3;
-          return onZ&&onX;
+          return p.z>=Math.min(w.z1n,w.z2n)-.15&&p.z<=Math.max(w.z1n,w.z2n)+.15&&Math.abs(p.x-w.x1n)<0.3;
         }
       });
-
-      // Ordenar ao longo da parede
       onWall.sort((a,b)=>w.t==='H'?a.x-b.x:a.z-b.z);
-
-      // Linha ao nível do topo das paredes — ligação estrutural
       if(onWall.length>=2){
         for(let k=0;k<onWall.length-1;k++){
           const a=onWall[k],b=onWall[k+1];
-          // Linha de topo
           const gTop=new THREE.BufferGeometry().setFromPoints([
-            new THREE.Vector3(a.x,WALL_H,a.z),
-            new THREE.Vector3(b.x,WALL_H,b.z)
-          ]);
+            new THREE.Vector3(a.x,WALL_H,a.z),new THREE.Vector3(b.x,WALL_H,b.z)]);
           pillarGroup.add(new THREE.Line(gTop,lineMat));
-          // Linha de base
           const gBot=new THREE.BufferGeometry().setFromPoints([
-            new THREE.Vector3(a.x,.04,a.z),
-            new THREE.Vector3(b.x,.04,b.z)
-          ]);
+            new THREE.Vector3(a.x,.04,a.z),new THREE.Vector3(b.x,.04,b.z)]);
           pillarGroup.add(new THREE.Line(gBot,lineMat2));
-          // Linha diagonal (travamento visual)
           const gDiag=new THREE.BufferGeometry().setFromPoints([
-            new THREE.Vector3(a.x,.04,a.z),
-            new THREE.Vector3(b.x,WALL_H,b.z)
-          ]);
+            new THREE.Vector3(a.x,.04,a.z),new THREE.Vector3(b.x,WALL_H,b.z)]);
           pillarGroup.add(new THREE.Line(gDiag,lineMat2));
         }
       }
     }
-
     scn.add(pillarGroup);
   }else{
     if(pillarGroup){scn.remove(pillarGroup);pillarGroup=null;}
@@ -931,10 +1117,22 @@ function setupControls(canvas){
 function set3dView(v,_=true){
   curView=v;
   document.querySelectorAll('.v3-btn').forEach(b=>b.classList.remove('on'));
-  if(v==='3d'){orb.rotX=-.32;orb.rotY=.35;orb.scale=1;el('vb-3d').classList.add('on');}
+  // recolocar estado fundação
+  if(isFoundation)el('vb-found').classList.add('on-earth');
+  if(isWF)el('vb-wf').classList.add('on');
+  if(v==='3d'){orb.rotX=isFoundation?-.5:-.32;orb.rotY=isFoundation?.6:.35;orb.scale=1;el('vb-3d').classList.add('on');}
   else if(v==='top'){el('vb-top').classList.add('on');}
 }
-function toggleWF(){isWF=!isWF;el('vb-wf').classList.toggle('on',isWF);applyPillarView(isWF,lastWalls);}
+
+function toggleWF(){
+  // não permite malha e fundação ao mesmo tempo
+  if(isFoundation){
+    toggleFoundation(); // desligar fundação primeiro
+  }
+  isWF=!isWF;
+  el('vb-wf').classList.toggle('on',isWF);
+  applyPillarView(isWF,lastWalls);
+}
 
 window.addEventListener('resize',()=>{
   if(ren&&cam){ren.setSize(window.innerWidth,window.innerHeight);cam.aspect=window.innerWidth/window.innerHeight;cam.updateProjectionMatrix();}
