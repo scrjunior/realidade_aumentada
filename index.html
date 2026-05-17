@@ -288,11 +288,11 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
 
 <!-- LEGENDA FUNDAÇÃO -->
 <div id="found-legend">
-  <div class="fl-title">Fundação</div>
-  <div class="fl-item"><div class="fl-swatch" style="background:#8b5e3c"></div><div class="fl-text">Sapatas isoladas</div></div>
-  <div class="fl-item"><div class="fl-swatch" style="background:#6b4f2a"></div><div class="fl-text">Vigas de fundação</div></div>
-  <div class="fl-item"><div class="fl-swatch" style="background:#4a3520"></div><div class="fl-text">Laje de betão</div></div>
-  <div class="fl-item"><div class="fl-swatch" style="background:#2d2315"></div><div class="fl-text">Terra/solo</div></div>
+  <div class="fl-title">Escavação</div>
+  <div class="fl-item"><div class="fl-swatch" style="background:#5a3e28"></div><div class="fl-text">Solo natural</div></div>
+  <div class="fl-item"><div class="fl-swatch" style="background:#1a1208"></div><div class="fl-text">Valas abertas</div></div>
+  <div class="fl-item"><div class="fl-swatch" style="background:#b06000"></div><div class="fl-text">Armadura (aço)</div></div>
+  <div class="fl-item"><div class="fl-swatch" style="background:#888070"></div><div class="fl-text">Betão lançado</div></div>
 </div>
 
 <button class="back-btn" id="back-btn" onclick="goBack()">✕</button>
@@ -761,46 +761,49 @@ function buildFoundationView(walls){
   if(foundationGroup){scn.remove(foundationGroup);foundationGroup=null;}
   foundationGroup=new THREE.Group();
 
-  // Calcular bounds
+  // ── Dimensões globais
   let x0=Infinity,x1=-Infinity,z0=Infinity,z1=-Infinity;
   for(const w of walls){
     x0=Math.min(x0,w.x1n,w.x2n);x1=Math.max(x1,w.x1n,w.x2n);
     z0=Math.min(z0,w.z1n,w.z2n);z1=Math.max(z1,w.z1n,w.z2n);
   }
-  const cx=(x0+x1)/2, cz=(z0+z1)/2;
-  const pw=x1-x0+1.2, pd=z1-z0+1.2;
+  const gcx=(x0+x1)/2, gcz=(z0+z1)/2;
+  const pw=x1-x0+2.0, pd=z1-z0+2.0;
 
-  // ── Camada de terra (solo natural)
-  const mSolo=new THREE.MeshStandardMaterial({color:0x2d2315,roughness:1,metalness:0});
-  const solo=new THREE.Mesh(new THREE.BoxGeometry(pw+3,1.2,pd+3),mSolo);
-  solo.position.set(cx,-1.8,cz);
-  solo.receiveShadow=true;
-  foundationGroup.add(solo);
+  // Dimensões das valas
+  const TRENCH_W  = 0.55;  // largura da vala
+  const TRENCH_D  = 1.10;  // profundidade total da vala
+  const SOIL_H    = 1.40;  // espessura do bloco de terra visível
+  const TOP_Y     = 0.0;   // nível do solo = y=0
+  const TRENCH_BOT= TOP_Y - TRENCH_D;   // fundo da vala
+  const CONC_H    = 0.28;  // altura do betão lançado no fundo
+  const REBAR_CLR = 0.06;  // cobrimento dos varões
 
-  // Grid no topo da terra
-  const gridSolo=new THREE.GridHelper(Math.max(pw,pd)+3,12,0x4a3520,0x3a2a18);
-  gridSolo.position.set(cx,-1.2,cz);
-  foundationGroup.add(gridSolo);
+  // ── Materiais
+  const mSoloTop  = new THREE.MeshStandardMaterial({color:0x5a3e28,roughness:1,metalness:0});
+  const mSoloSide = new THREE.MeshStandardMaterial({color:0x3d2a18,roughness:1,metalness:0});
+  const mSoloBot  = new THREE.MeshStandardMaterial({color:0x2e1f0e,roughness:1,metalness:0});
+  const mConc     = new THREE.MeshStandardMaterial({color:0x888070,roughness:.92,metalness:.02});
+  const mRebar    = new THREE.MeshStandardMaterial({color:0xb06000,roughness:.5,metalness:.7});
 
-  // ── Laje de betão (radier/laje de fundação)
-  const mBetao=new THREE.MeshStandardMaterial({color:0x4a4a3e,roughness:.9,metalness:.05});
-  const laje=new THREE.Mesh(new THREE.BoxGeometry(pw,0.3,pd),mBetao);
-  laje.position.set(cx,-0.95,cz);
-  laje.castShadow=true;laje.receiveShadow=true;
-  foundationGroup.add(laje);
+  // ── BLOCO DE TERRA PRINCIPAL (com valas subtraídas visualmente)
+  // Plano superior da terra (cobertura contínua, com buracos deixados pelas valas)
+  // Fazemos um plano largo e depois adicionamos paredes de trincheira
+  const soloMesh = new THREE.Mesh(
+    new THREE.BoxGeometry(pw+4, SOIL_H, pd+4), mSoloTop
+  );
+  soloMesh.position.set(gcx, TOP_Y - SOIL_H/2, gcz);
+  soloMesh.receiveShadow=true;
+  foundationGroup.add(soloMesh);
 
-  // Arestas da laje
-  const lajeEdge=new THREE.EdgesGeometry(new THREE.BoxGeometry(pw,0.3,pd));
-  const lajeEdgeMesh=new THREE.LineSegments(lajeEdge,
-    new THREE.LineBasicMaterial({color:0x8a8a70,opacity:.5,transparent:true}));
-  lajeEdgeMesh.position.set(cx,-0.95,cz);
-  foundationGroup.add(lajeEdgeMesh);
+  // Grade superficial (textura de terreno)
+  const gridSurf = new THREE.GridHelper(Math.max(pw,pd)+4, 20, 0x7a5535, 0x6a4828);
+  gridSurf.position.set(gcx, TOP_Y+0.005, gcz);
+  foundationGroup.add(gridSurf);
 
-  // ── Vigas de fundação ao longo de cada parede
-  const mViga=new THREE.MeshStandardMaterial({color:0x6b4f2a,roughness:.85,metalness:.08});
-  const mVigaEdge=new THREE.LineBasicMaterial({color:0xb8966e,opacity:.6,transparent:true});
-  const VIGA_H=0.6; // altura da viga abaixo da laje
-  const VIGA_W=0.32; // largura da viga
+  // ── Para cada parede: vala escavada + armadura + betão parcialmente lançado
+  const mRebarLine = new THREE.LineBasicMaterial({color:0xd07010,opacity:.9,transparent:true});
+  const mStirrup   = new THREE.LineBasicMaterial({color:0xc06010,opacity:.75,transparent:true});
 
   for(const w of walls){
     const dx=w.x2n-w.x1n, dz=w.z2n-w.z1n;
@@ -808,34 +811,111 @@ function buildFoundationView(walls){
     if(len<.15)continue;
     const wcx=(w.x1n+w.x2n)/2, wcz=(w.z1n+w.z2n)/2;
     const angle=Math.atan2(dz,dx);
+    const nx= dz/len, nz=-dx/len; // normal perpendicular à vala
 
-    const vigaMesh=new THREE.Mesh(
-      new THREE.BoxGeometry(len+VIGA_W,VIGA_H,VIGA_W),mViga);
-    vigaMesh.position.set(wcx,-1.1,wcz); // embutida na laje e desce
-    vigaMesh.rotation.y=-angle;
-    vigaMesh.castShadow=true;vigaMesh.receiveShadow=true;
-    foundationGroup.add(vigaMesh);
+    // ── Paredes laterais da vala (terra escura exposta ao corte)
+    // Parede lateral esquerda e direita da trincheira
+    for(const side of[-1,1]){
+      const wallTrench=new THREE.Mesh(
+        new THREE.BoxGeometry(len+TRENCH_W, TRENCH_D, 0.04),
+        mSoloSide
+      );
+      wallTrench.position.set(
+        wcx + nx*(TRENCH_W/2)*side,
+        TOP_Y - TRENCH_D/2,
+        wcz + nz*(TRENCH_W/2)*side
+      );
+      wallTrench.rotation.y=-angle;
+      wallTrench.receiveShadow=true;
+      foundationGroup.add(wallTrench);
+    }
 
-    // Arestas da viga
-    const ve=new THREE.EdgesGeometry(new THREE.BoxGeometry(len+VIGA_W,VIGA_H,VIGA_W));
-    const vem=new THREE.LineSegments(ve,mVigaEdge);
-    vem.position.set(wcx,-1.1,wcz);
-    vem.rotation.y=-angle;
-    foundationGroup.add(vem);
+    // Fundo da vala (terra compactada no fundo)
+    const trenchFloor=new THREE.Mesh(
+      new THREE.BoxGeometry(len+TRENCH_W, 0.04, TRENCH_W),
+      mSoloBot
+    );
+    trenchFloor.position.set(wcx, TRENCH_BOT+0.02, wcz);
+    trenchFloor.rotation.y=-angle;
+    trenchFloor.receiveShadow=true;
+    foundationGroup.add(trenchFloor);
+
+    // ── Betão lançado no fundo da vala (camada de regularização + início do radier)
+    // Betão cobre apenas ~25% da profundidade (vala ainda "aberta" e visível acima)
+    const concMesh=new THREE.Mesh(
+      new THREE.BoxGeometry(len+TRENCH_W*0.9, CONC_H, TRENCH_W*0.92),
+      mConc
+    );
+    concMesh.position.set(wcx, TRENCH_BOT + CONC_H/2 + 0.04, wcz);
+    concMesh.rotation.y=-angle;
+    concMesh.castShadow=true; concMesh.receiveShadow=true;
+    foundationGroup.add(concMesh);
+
+    // Superfície do betão — textura de topo granulada
+    const concTop=new THREE.Mesh(
+      new THREE.BoxGeometry(len+TRENCH_W*0.9, 0.015, TRENCH_W*0.92),
+      new THREE.MeshStandardMaterial({color:0x9a9282,roughness:1,metalness:0})
+    );
+    concTop.position.set(wcx, TRENCH_BOT+CONC_H+0.04+0.008, wcz);
+    concTop.rotation.y=-angle;
+    foundationGroup.add(concTop);
+
+    // ── Armadura longitudinal (varões na direção da vala)
+    // 4 varões: 2 em cima, 2 em baixo (gaiola de armadura)
+    const rebarY_bot = TRENCH_BOT + REBAR_CLR + 0.04 + 0.02;
+    const rebarY_top = TRENCH_BOT + CONC_H + 0.04 - REBAR_CLR*1.5;
+    const rebarOffsets=[
+      {y:rebarY_bot, s:-1}, {y:rebarY_bot, s:1},
+      {y:rebarY_top, s:-1}, {y:rebarY_top, s:1}
+    ];
+    const rebarSideOff = TRENCH_W*0.28;
+
+    for(const rb of rebarOffsets){
+      // Varão como cilindro fino
+      const rbGeo=new THREE.CylinderGeometry(0.012,0.012,len,6);
+      const rbMesh=new THREE.Mesh(rbGeo,mRebar);
+      rbMesh.rotation.z=Math.PI/2; // deitar horizontalmente
+      // posicionar na direção da vala
+      const offX=nx*rebarSideOff*rb.s;
+      const offZ=nz*rebarSideOff*rb.s;
+      rbMesh.position.set(wcx+offX, rb.y, wcz+offZ);
+      rbMesh.rotation.order='YZX';
+      rbMesh.rotation.y=-angle;
+      rbMesh.rotation.z=Math.PI/2;
+      rbMesh.castShadow=true;
+      foundationGroup.add(rbMesh);
+    }
+
+    // ── Estribos (varões transversais a cada ~0.35 unidades de comprimento)
+    const stirrupSpacing=0.38;
+    const numStirrups=Math.max(2,Math.floor(len/stirrupSpacing));
+    const stirrupW=TRENCH_W*0.56;
+    const stirrupH=CONC_H - REBAR_CLR*2.5;
+
+    for(let si=0;si<=numStirrups;si++){
+      const t=(si/numStirrups)-.5;
+      const sx=wcx + dx*t + nx*0;
+      const sz=wcz + dz*t + nz*0;
+
+      // Retângulo do estribo (4 segmentos)
+      const corners=[
+        new THREE.Vector3(sx+nx*stirrupW/2, rebarY_bot, sz+nz*stirrupW/2),
+        new THREE.Vector3(sx-nx*stirrupW/2, rebarY_bot, sz-nz*stirrupW/2),
+        new THREE.Vector3(sx-nx*stirrupW/2, rebarY_bot+stirrupH, sz-nz*stirrupW/2),
+        new THREE.Vector3(sx+nx*stirrupW/2, rebarY_bot+stirrupH, sz+nz*stirrupW/2),
+        new THREE.Vector3(sx+nx*stirrupW/2, rebarY_bot, sz+nz*stirrupW/2),
+      ];
+      const gSt=new THREE.BufferGeometry().setFromPoints(corners);
+      foundationGroup.add(new THREE.Line(gSt,mStirrup));
+    }
   }
 
-  // ── Sapatas isoladas nos pontos de encontro das paredes
-  const mSapata=new THREE.MeshStandardMaterial({color:0x8b5e3c,roughness:.75,metalness:.1});
-  const mSapataTop=new THREE.MeshStandardMaterial({color:0xa07040,roughness:.7,metalness:.12});
-  const mSapataEdge=new THREE.LineBasicMaterial({color:0xd4a070,opacity:.7,transparent:true});
-
-  // Recolher pontos de interseção e extremidades
+  // ── Recolher pontos de interseção para mostrar ampliação das valas nas junções
   const pts=[];
   for(const w of walls){
     pts.push({x:w.x1n,z:w.z1n});
     pts.push({x:w.x2n,z:w.z2n});
   }
-  // Interseções perpendiculares
   for(let i=0;i<walls.length;i++){
     for(let j=i+1;j<walls.length;j++){
       const a=walls[i],b=walls[j];
@@ -854,88 +934,73 @@ function buildFoundationView(walls){
       }
     }
   }
-  // Deduplicar
   const unique=[];
   for(const p of pts){
     if(!unique.some(u=>Math.hypot(u.x-p.x,u.z-p.z)<0.25))unique.push(p);
   }
 
-  // Sapatas: caixão escalonado (base larga + topo estreito)
-  const SAPATA_BASE=0.85, SAPATA_TOP_W=0.42, SAPATA_H_BOT=0.35, SAPATA_H_TOP=0.25;
+  // ── Ampliação da vala nos pontos de encontro (escavação de junção)
+  const mJuncSide=new THREE.MeshStandardMaterial({color:0x2e1f0e,roughness:1,metalness:0});
+  const JUNC_R=TRENCH_W*0.88;
   for(const p of unique){
-    // Base da sapata (mais larga, fundo)
-    const base=new THREE.Mesh(
-      new THREE.BoxGeometry(SAPATA_BASE,SAPATA_H_BOT,SAPATA_BASE),mSapata);
-    base.position.set(p.x,-1.45,p.z);
-    base.castShadow=true;base.receiveShadow=true;
-    foundationGroup.add(base);
+    // Fundo escuro da junção
+    const jFloor=new THREE.Mesh(
+      new THREE.BoxGeometry(JUNC_R*2,0.04,JUNC_R*2), mSoloBot
+    );
+    jFloor.position.set(p.x, TRENCH_BOT+0.02, p.z);
+    foundationGroup.add(jFloor);
 
-    // Topo da sapata (mais estreito, encontra a laje)
-    const top=new THREE.Mesh(
-      new THREE.BoxGeometry(SAPATA_TOP_W,SAPATA_H_TOP,SAPATA_TOP_W),mSapataTop);
-    top.position.set(p.x,-1.025,p.z);
-    top.castShadow=true;
-    foundationGroup.add(top);
+    // Betão da junção
+    const jConc=new THREE.Mesh(
+      new THREE.BoxGeometry(JUNC_R*1.9,CONC_H,JUNC_R*1.9), mConc
+    );
+    jConc.position.set(p.x, TRENCH_BOT+CONC_H/2+0.04, p.z);
+    foundationGroup.add(jConc);
 
-    // Arestas da sapata
-    const se=new THREE.EdgesGeometry(new THREE.BoxGeometry(SAPATA_BASE,SAPATA_H_BOT,SAPATA_BASE));
-    const sem=new THREE.LineSegments(se,mSapataEdge);
-    sem.position.set(p.x,-1.45,p.z);
-    foundationGroup.add(sem);
-
-    // Armação simulada (cruz no topo da sapata — detalhe visual)
-    const armMat=new THREE.LineBasicMaterial({color:0xe08040,opacity:.5,transparent:true});
-    const hs=SAPATA_BASE*.4;
-    const armH=new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(p.x-hs,-1.27,p.z),
-      new THREE.Vector3(p.x+hs,-1.27,p.z)
+    // Armadura em cruz na junção (varões saindo da vala)
+    const armMat=new THREE.LineBasicMaterial({color:0xe07820,opacity:.85,transparent:true});
+    const hs=JUNC_R*0.85;
+    const yRebar=TRENCH_BOT+CONC_H*0.55;
+    // Cruz horizontal
+    const gH=new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(p.x-hs,yRebar,p.z),
+      new THREE.Vector3(p.x+hs,yRebar,p.z)
     ]);
-    foundationGroup.add(new THREE.Line(armH,armMat));
-    const armV=new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(p.x,-1.27,p.z-hs),
-      new THREE.Vector3(p.x,-1.27,p.z+hs)
+    foundationGroup.add(new THREE.Line(gH,armMat));
+    const gV=new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(p.x,yRebar,p.z-hs),
+      new THREE.Vector3(p.x,yRebar,p.z+hs)
     ]);
-    foundationGroup.add(new THREE.Line(armV,armMat));
-  }
-
-  // ── Linhas de armação longitudinal nas vigas (detalhe visual)
-  const armLongMat=new THREE.LineBasicMaterial({color:0xd4924e,opacity:.4,transparent:true});
-  for(const w of walls){
-    const dx=w.x2n-w.x1n, dz=w.z2n-w.z1n;
-    const len=Math.hypot(dx,dz);
-    if(len<.15)continue;
-    // 2 varões longitudinais simulados
-    const nx=dz/len*.08, nz=-dx/len*.08; // normal perpendicular
-    for(const side of[-1,1]){
-      const gArm=new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(w.x1n+nx*side,-1.0,w.z1n+nz*side),
-        new THREE.Vector3(w.x2n+nx*side,-1.0,w.z2n+nz*side)
-      ]);
-      foundationGroup.add(new THREE.Line(gArm,armLongMat));
-      const gArm2=new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(w.x1n+nx*side,-1.55,w.z1n+nz*side),
-        new THREE.Vector3(w.x2n+nx*side,-1.55,w.z2n+nz*side)
-      ]);
-      foundationGroup.add(new THREE.Line(gArm2,armLongMat));
-    }
+    foundationGroup.add(new THREE.Line(gV,armMat));
+    // Diagonal (representação da malha de armadura)
+    const gD1=new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(p.x-hs*.7,yRebar,p.z-hs*.7),
+      new THREE.Vector3(p.x+hs*.7,yRebar,p.z+hs*.7)
+    ]);
+    foundationGroup.add(new THREE.Line(gD1,new THREE.LineBasicMaterial({color:0xe07820,opacity:.4,transparent:true})));
+    const gD2=new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(p.x+hs*.7,yRebar,p.z-hs*.7),
+      new THREE.Vector3(p.x-hs*.7,yRebar,p.z+hs*.7)
+    ]);
+    foundationGroup.add(new THREE.Line(gD2,new THREE.LineBasicMaterial({color:0xe07820,opacity:.4,transparent:true})));
   }
 
   scn.add(foundationGroup);
 }
 
 function showFoundation(walls){
-  // Esconder paredes — mostrar apenas fundação
+  // Esconder paredes — mostrar apenas escavação
   if(hg)hg.visible=false;
 
-  // Câmera descer para ver fundação
-  orb.rotX=-.5;orb.rotY=.6;orb.scale=1.1;
+  // Câmera baixa e inclinada para ver as valas abertas de perto
+  orb.rotX=-.62;orb.rotY=.55;orb.scale=1.2;
 
   buildFoundationView(walls);
-  el('v3-title-label').textContent='Vista Fundação';
+  el('v3-title-label').textContent='Vista Escavação';
   el('v3-info').style.color='#c49a6c';
-  el('v3-info').style.background='rgba(139,94,60,.12)';
-  el('v3-info').style.borderColor='rgba(139,94,60,.3)';
-  el('v3-info').textContent='Fundação gerada';
+  el('v3-info').style.background='rgba(90,62,40,.18)';
+  el('v3-info').style.borderColor='rgba(139,94,60,.35)';
+  el('v3-info').textContent='Valas + armadura';
   on('found-legend');
 }
 
@@ -1074,13 +1139,15 @@ function loop3d(){
   animId=requestAnimationFrame(loop3d);
   if(!ren||!scn||!cam)return;
   const r=12*orb.scale;
+  // Vista fundação: câmera olha para o nível das valas (-0.5)
+  const lookY = isFoundation ? -0.5 : 1.5;
   if(curView==='top'){
-    cam.position.set(0,16*orb.scale,.01);cam.lookAt(0,0,0);
+    cam.position.set(0,16*orb.scale,.01);cam.lookAt(0,lookY,0);
   }else{
     cam.position.set(Math.sin(orb.rotY)*Math.cos(orb.rotX)*r,
       Math.sin(orb.rotX)*r+4,
       Math.cos(orb.rotY)*Math.cos(orb.rotX)*r);
-    cam.lookAt(0,1.5,0);
+    cam.lookAt(0,lookY,0);
   }
   ren.render(scn,cam);
 }
