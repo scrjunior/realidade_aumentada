@@ -761,156 +761,119 @@ function buildFoundationView(walls){
   if(foundationGroup){scn.remove(foundationGroup);foundationGroup=null;}
   foundationGroup=new THREE.Group();
 
-  // ── Dimensões globais
+  // ── Bounds
   let x0=Infinity,x1=-Infinity,z0=Infinity,z1=-Infinity;
   for(const w of walls){
     x0=Math.min(x0,w.x1n,w.x2n);x1=Math.max(x1,w.x1n,w.x2n);
     z0=Math.min(z0,w.z1n,w.z2n);z1=Math.max(z1,w.z1n,w.z2n);
   }
   const gcx=(x0+x1)/2, gcz=(z0+z1)/2;
-  const pw=x1-x0+2.0, pd=z1-z0+2.0;
+  const pw=x1-x0+2.4, pd=z1-z0+2.4;
 
-  // Dimensões das valas
-  const TRENCH_W  = 0.55;  // largura da vala
-  const TRENCH_D  = 1.10;  // profundidade total da vala
-  const SOIL_H    = 1.40;  // espessura do bloco de terra visível
-  const TOP_Y     = 0.0;   // nível do solo = y=0
-  const TRENCH_BOT= TOP_Y - TRENCH_D;   // fundo da vala
-  const CONC_H    = 0.28;  // altura do betão lançado no fundo
-  const REBAR_CLR = 0.06;  // cobrimento dos varões
+  // ── Cotas (tudo acima de y=0, completamente visível)
+  const BEAM_W   = 0.42;   // largura da viga de fundação
+  const BEAM_H   = 0.32;   // altura da viga (sobressai do solo)
+  const PILLAR_S = 0.30;   // lado do pilar de arranque
+  const PILLAR_H = 0.90;   // altura do pilar (bem visível)
+  const REBAR_UP = 0.55;   // até que altura os varões sobem acima da viga
+
+  // ── SOLO — plano baixo, chão de terra
+  const mSolo=new THREE.MeshStandardMaterial({color:0x4a3322,roughness:1,metalness:0});
+  const soloPlane=new THREE.Mesh(new THREE.PlaneGeometry(pw+6,pd+6),mSolo);
+  soloPlane.rotation.x=-Math.PI/2;
+  soloPlane.position.set(gcx,-0.02,gcz);
+  soloPlane.receiveShadow=true;
+  foundationGroup.add(soloPlane);
+
+  // Grid de terra (visível, não tapado)
+  const gridG=new THREE.GridHelper(Math.max(pw,pd)+5,22,0x6b4a2e,0x5a3d22);
+  gridG.position.set(gcx,0,gcz);
+  foundationGroup.add(gridG);
 
   // ── Materiais
-  const mSoloTop  = new THREE.MeshStandardMaterial({color:0x5a3e28,roughness:1,metalness:0});
-  const mSoloSide = new THREE.MeshStandardMaterial({color:0x3d2a18,roughness:1,metalness:0});
-  const mSoloBot  = new THREE.MeshStandardMaterial({color:0x2e1f0e,roughness:1,metalness:0});
-  const mConc     = new THREE.MeshStandardMaterial({color:0x888070,roughness:.92,metalness:.02});
-  const mRebar    = new THREE.MeshStandardMaterial({color:0xb06000,roughness:.5,metalness:.7});
+  const mBeam =new THREE.MeshStandardMaterial({color:0x7a7568,roughness:.88,metalness:.04}); // betão cinzento
+  const mBeamT=new THREE.MeshStandardMaterial({color:0x8a8578,roughness:.85,metalness:.04}); // topo mais claro
+  const mPillar=new THREE.MeshStandardMaterial({color:0x696058,roughness:.82,metalness:.06});
+  const mRebar =new THREE.MeshStandardMaterial({color:0xcc6600,roughness:.4,metalness:.85});  // aço laranja-ferrugem
+  const mRebarLine=new THREE.LineBasicMaterial({color:0xff8822,opacity:1,transparent:false});
+  const mStirrup  =new THREE.LineBasicMaterial({color:0xee7711,opacity:.9,transparent:true});
 
-  // ── BLOCO DE TERRA PRINCIPAL (com valas subtraídas visualmente)
-  // Plano superior da terra (cobertura contínua, com buracos deixados pelas valas)
-  // Fazemos um plano largo e depois adicionamos paredes de trincheira
-  const soloMesh = new THREE.Mesh(
-    new THREE.BoxGeometry(pw+4, SOIL_H, pd+4), mSoloTop
-  );
-  soloMesh.position.set(gcx, TOP_Y - SOIL_H/2, gcz);
-  soloMesh.receiveShadow=true;
-  foundationGroup.add(soloMesh);
-
-  // Grade superficial (textura de terreno)
-  const gridSurf = new THREE.GridHelper(Math.max(pw,pd)+4, 20, 0x7a5535, 0x6a4828);
-  gridSurf.position.set(gcx, TOP_Y+0.005, gcz);
-  foundationGroup.add(gridSurf);
-
-  // ── Para cada parede: vala escavada + armadura + betão parcialmente lançado
-  const mRebarLine = new THREE.LineBasicMaterial({color:0xd07010,opacity:.9,transparent:true});
-  const mStirrup   = new THREE.LineBasicMaterial({color:0xc06010,opacity:.75,transparent:true});
-
+  // ── VIGAS DE FUNDAÇÃO ao longo de cada parede (betão, emerges from ground)
   for(const w of walls){
     const dx=w.x2n-w.x1n, dz=w.z2n-w.z1n;
     const len=Math.hypot(dx,dz);
     if(len<.15)continue;
     const wcx=(w.x1n+w.x2n)/2, wcz=(w.z1n+w.z2n)/2;
     const angle=Math.atan2(dz,dx);
-    const nx= dz/len, nz=-dx/len; // normal perpendicular à vala
+    const nx=dz/len, nz=-dx/len; // normal da viga
 
-    // ── Paredes laterais da vala (terra escura exposta ao corte)
-    // Parede lateral esquerda e direita da trincheira
-    for(const side of[-1,1]){
-      const wallTrench=new THREE.Mesh(
-        new THREE.BoxGeometry(len+TRENCH_W, TRENCH_D, 0.04),
-        mSoloSide
-      );
-      wallTrench.position.set(
-        wcx + nx*(TRENCH_W/2)*side,
-        TOP_Y - TRENCH_D/2,
-        wcz + nz*(TRENCH_W/2)*side
-      );
-      wallTrench.rotation.y=-angle;
-      wallTrench.receiveShadow=true;
-      foundationGroup.add(wallTrench);
+    // Corpo principal da viga — assenta no chão, cresce para cima
+    const beamMesh=new THREE.Mesh(
+      new THREE.BoxGeometry(len, BEAM_H, BEAM_W), mBeam);
+    beamMesh.position.set(wcx, BEAM_H/2, wcz);
+    beamMesh.rotation.y=-angle;
+    beamMesh.castShadow=true; beamMesh.receiveShadow=true;
+    foundationGroup.add(beamMesh);
+
+    // Topo da viga (face superior mais clara — betão fresco)
+    const beamTop=new THREE.Mesh(
+      new THREE.BoxGeometry(len, 0.02, BEAM_W), mBeamT);
+    beamTop.position.set(wcx, BEAM_H+0.01, wcz);
+    beamTop.rotation.y=-angle;
+    foundationGroup.add(beamTop);
+
+    // Arestas da viga
+    const beamEdge=new THREE.EdgesGeometry(new THREE.BoxGeometry(len,BEAM_H,BEAM_W));
+    const beamEdgeMesh=new THREE.LineSegments(beamEdge,
+      new THREE.LineBasicMaterial({color:0xaaa090,opacity:.55,transparent:true}));
+    beamEdgeMesh.position.set(wcx,BEAM_H/2,wcz);
+    beamEdgeMesh.rotation.y=-angle;
+    foundationGroup.add(beamEdgeMesh);
+
+    // ── Armadura longitudinal — 4 varões saem da viga para cima (esperas de pilar)
+    // Espaçados regularmente ao longo da viga
+    const spacingRebar=0.55;
+    const numR=Math.max(3,Math.floor(len/spacingRebar));
+    const sideOff=BEAM_W*0.28;
+
+    for(let ri=0;ri<=numR;ri++){
+      const t=(ri/numR)-.5;
+      const rx=wcx+dx*t, rz=wcz+dz*t;
+
+      for(const side of[-1,1]){
+        const ox=nx*sideOff*side, oz=nz*sideOff*side;
+        // Varão como cilindro vertical que emerge da viga
+        const rGeo=new THREE.CylinderGeometry(0.018,0.018,BEAM_H+REBAR_UP,6);
+        const rMesh=new THREE.Mesh(rGeo,mRebar);
+        rMesh.position.set(rx+ox, (BEAM_H+REBAR_UP)/2 - REBAR_UP*0.05, rz+oz);
+        rMesh.castShadow=true;
+        foundationGroup.add(rMesh);
+      }
     }
 
-    // Fundo da vala (terra compactada no fundo)
-    const trenchFloor=new THREE.Mesh(
-      new THREE.BoxGeometry(len+TRENCH_W, 0.04, TRENCH_W),
-      mSoloBot
-    );
-    trenchFloor.position.set(wcx, TRENCH_BOT+0.02, wcz);
-    trenchFloor.rotation.y=-angle;
-    trenchFloor.receiveShadow=true;
-    foundationGroup.add(trenchFloor);
+    // ── Estribos visíveis a cada ~0.45 unidades — retângulos de arame laranja
+    const stirrupSpacing=0.48;
+    const numSt=Math.max(2,Math.floor(len/stirrupSpacing));
+    const sw=BEAM_W*0.55, sh=BEAM_H*0.72;
+    const sy0=BEAM_H*0.14; // começa perto do fundo
 
-    // ── Betão lançado no fundo da vala (camada de regularização + início do radier)
-    // Betão cobre apenas ~25% da profundidade (vala ainda "aberta" e visível acima)
-    const concMesh=new THREE.Mesh(
-      new THREE.BoxGeometry(len+TRENCH_W*0.9, CONC_H, TRENCH_W*0.92),
-      mConc
-    );
-    concMesh.position.set(wcx, TRENCH_BOT + CONC_H/2 + 0.04, wcz);
-    concMesh.rotation.y=-angle;
-    concMesh.castShadow=true; concMesh.receiveShadow=true;
-    foundationGroup.add(concMesh);
-
-    // Superfície do betão — textura de topo granulada
-    const concTop=new THREE.Mesh(
-      new THREE.BoxGeometry(len+TRENCH_W*0.9, 0.015, TRENCH_W*0.92),
-      new THREE.MeshStandardMaterial({color:0x9a9282,roughness:1,metalness:0})
-    );
-    concTop.position.set(wcx, TRENCH_BOT+CONC_H+0.04+0.008, wcz);
-    concTop.rotation.y=-angle;
-    foundationGroup.add(concTop);
-
-    // ── Armadura longitudinal (varões na direção da vala)
-    // 4 varões: 2 em cima, 2 em baixo (gaiola de armadura)
-    const rebarY_bot = TRENCH_BOT + REBAR_CLR + 0.04 + 0.02;
-    const rebarY_top = TRENCH_BOT + CONC_H + 0.04 - REBAR_CLR*1.5;
-    const rebarOffsets=[
-      {y:rebarY_bot, s:-1}, {y:rebarY_bot, s:1},
-      {y:rebarY_top, s:-1}, {y:rebarY_top, s:1}
-    ];
-    const rebarSideOff = TRENCH_W*0.28;
-
-    for(const rb of rebarOffsets){
-      // Varão como cilindro fino
-      const rbGeo=new THREE.CylinderGeometry(0.012,0.012,len,6);
-      const rbMesh=new THREE.Mesh(rbGeo,mRebar);
-      rbMesh.rotation.z=Math.PI/2; // deitar horizontalmente
-      // posicionar na direção da vala
-      const offX=nx*rebarSideOff*rb.s;
-      const offZ=nz*rebarSideOff*rb.s;
-      rbMesh.position.set(wcx+offX, rb.y, wcz+offZ);
-      rbMesh.rotation.order='YZX';
-      rbMesh.rotation.y=-angle;
-      rbMesh.rotation.z=Math.PI/2;
-      rbMesh.castShadow=true;
-      foundationGroup.add(rbMesh);
-    }
-
-    // ── Estribos (varões transversais a cada ~0.35 unidades de comprimento)
-    const stirrupSpacing=0.38;
-    const numStirrups=Math.max(2,Math.floor(len/stirrupSpacing));
-    const stirrupW=TRENCH_W*0.56;
-    const stirrupH=CONC_H - REBAR_CLR*2.5;
-
-    for(let si=0;si<=numStirrups;si++){
-      const t=(si/numStirrups)-.5;
-      const sx=wcx + dx*t + nx*0;
-      const sz=wcz + dz*t + nz*0;
-
-      // Retângulo do estribo (4 segmentos)
-      const corners=[
-        new THREE.Vector3(sx+nx*stirrupW/2, rebarY_bot, sz+nz*stirrupW/2),
-        new THREE.Vector3(sx-nx*stirrupW/2, rebarY_bot, sz-nz*stirrupW/2),
-        new THREE.Vector3(sx-nx*stirrupW/2, rebarY_bot+stirrupH, sz-nz*stirrupW/2),
-        new THREE.Vector3(sx+nx*stirrupW/2, rebarY_bot+stirrupH, sz+nz*stirrupW/2),
-        new THREE.Vector3(sx+nx*stirrupW/2, rebarY_bot, sz+nz*stirrupW/2),
+    for(let si=0;si<=numSt;si++){
+      const t=(si/numSt)-.5;
+      const sx=wcx+dx*t, sz=wcz+dz*t;
+      const pts=[
+        new THREE.Vector3(sx+nx*sw/2, sy0,      sz+nz*sw/2),
+        new THREE.Vector3(sx-nx*sw/2, sy0,      sz-nz*sw/2),
+        new THREE.Vector3(sx-nx*sw/2, sy0+sh,   sz-nz*sw/2),
+        new THREE.Vector3(sx+nx*sw/2, sy0+sh,   sz+nz*sw/2),
+        new THREE.Vector3(sx+nx*sw/2, sy0,      sz+nz*sw/2),
       ];
-      const gSt=new THREE.BufferGeometry().setFromPoints(corners);
-      foundationGroup.add(new THREE.Line(gSt,mStirrup));
+      foundationGroup.add(new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints(pts), mStirrup));
     }
   }
 
-  // ── Recolher pontos de interseção para mostrar ampliação das valas nas junções
+  // ── PILARES DE ARRANQUE — nos pontos de encontro das paredes
+  // São os stubs de betão que irão receber as paredes
   const pts=[];
   for(const w of walls){
     pts.push({x:w.x1n,z:w.z1n});
@@ -923,66 +886,71 @@ function buildFoundationView(walls){
       let ix,iz;
       if(a.t==='H'&&b.t==='V'){
         ix=b.x1n;iz=a.z1n;
-        const onA=ix>=Math.min(a.x1n,a.x2n)-.1&&ix<=Math.max(a.x1n,a.x2n)+.1;
-        const onB=iz>=Math.min(b.z1n,b.z2n)-.1&&iz<=Math.max(b.z1n,b.z2n)+.1;
+        const onA=ix>=Math.min(a.x1n,a.x2n)-.12&&ix<=Math.max(a.x1n,a.x2n)+.12;
+        const onB=iz>=Math.min(b.z1n,b.z2n)-.12&&iz<=Math.max(b.z1n,b.z2n)+.12;
         if(onA&&onB)pts.push({x:ix,z:iz});
       }else{
         ix=a.x1n;iz=b.z1n;
-        const onA=iz>=Math.min(a.z1n,a.z2n)-.1&&iz<=Math.max(a.z1n,a.z2n)+.1;
-        const onB=ix>=Math.min(b.x1n,b.x2n)-.1&&ix<=Math.max(b.x1n,b.x2n)+.1;
+        const onA=iz>=Math.min(a.z1n,a.z2n)-.12&&iz<=Math.max(a.z1n,a.z2n)+.12;
+        const onB=ix>=Math.min(b.x1n,b.x2n)-.12&&ix<=Math.max(b.x1n,b.x2n)+.12;
         if(onA&&onB)pts.push({x:ix,z:iz});
       }
     }
   }
   const unique=[];
   for(const p of pts){
-    if(!unique.some(u=>Math.hypot(u.x-p.x,u.z-p.z)<0.25))unique.push(p);
+    if(!unique.some(u=>Math.hypot(u.x-p.x,u.z-p.z)<0.28))unique.push(p);
   }
 
-  // ── Ampliação da vala nos pontos de encontro (escavação de junção)
-  const mJuncSide=new THREE.MeshStandardMaterial({color:0x2e1f0e,roughness:1,metalness:0});
-  const JUNC_R=TRENCH_W*0.88;
+  const mPillarTop=new THREE.MeshStandardMaterial({color:0x555048,roughness:.8,metalness:.08});
+  const mRebarV   =new THREE.MeshStandardMaterial({color:0xdd5500,roughness:.35,metalness:.9});
+  const mArmCruz  =new THREE.LineBasicMaterial({color:0xff9933,opacity:1,transparent:false});
+
   for(const p of unique){
-    // Fundo escuro da junção
-    const jFloor=new THREE.Mesh(
-      new THREE.BoxGeometry(JUNC_R*2,0.04,JUNC_R*2), mSoloBot
-    );
-    jFloor.position.set(p.x, TRENCH_BOT+0.02, p.z);
-    foundationGroup.add(jFloor);
+    // Pilar de betão — cresce bem acima da viga
+    const pilMesh=new THREE.Mesh(
+      new THREE.BoxGeometry(PILLAR_S,PILLAR_H,PILLAR_S), mPillar);
+    pilMesh.position.set(p.x,PILLAR_H/2,p.z);
+    pilMesh.castShadow=true; pilMesh.receiveShadow=true;
+    foundationGroup.add(pilMesh);
 
-    // Betão da junção
-    const jConc=new THREE.Mesh(
-      new THREE.BoxGeometry(JUNC_R*1.9,CONC_H,JUNC_R*1.9), mConc
-    );
-    jConc.position.set(p.x, TRENCH_BOT+CONC_H/2+0.04, p.z);
-    foundationGroup.add(jConc);
+    // Capitel do pilar (topo ligeiramente alargado — padrão construtivo)
+    const capMesh=new THREE.Mesh(
+      new THREE.BoxGeometry(PILLAR_S+0.1,0.06,PILLAR_S+0.1), mPillarTop);
+    capMesh.position.set(p.x,PILLAR_H+0.03,p.z);
+    foundationGroup.add(capMesh);
 
-    // Armadura em cruz na junção (varões saindo da vala)
-    const armMat=new THREE.LineBasicMaterial({color:0xe07820,opacity:.85,transparent:true});
-    const hs=JUNC_R*0.85;
-    const yRebar=TRENCH_BOT+CONC_H*0.55;
-    // Cruz horizontal
+    // Arestas do pilar
+    const pilEdge=new THREE.EdgesGeometry(new THREE.BoxGeometry(PILLAR_S,PILLAR_H,PILLAR_S));
+    const pilEdgeMesh=new THREE.LineSegments(pilEdge,
+      new THREE.LineBasicMaterial({color:0x998880,opacity:.6,transparent:true}));
+    pilEdgeMesh.position.set(p.x,PILLAR_H/2,p.z);
+    foundationGroup.add(pilEdgeMesh);
+
+    // ── 4 varões de aço saindo do topo do pilar (esperas para a parede acima)
+    const rebarOff=PILLAR_S*0.28;
+    const rebarH=0.55; // quanto sobem acima do pilar
+    for(const [ox,oz] of[[-rebarOff,-rebarOff],[rebarOff,-rebarOff],[-rebarOff,rebarOff],[rebarOff,rebarOff]]){
+      const rGeo=new THREE.CylinderGeometry(0.022,0.022,rebarH+PILLAR_H*0.3,6);
+      const rMesh=new THREE.Mesh(rGeo,mRebarV);
+      rMesh.position.set(p.x+ox, PILLAR_H - PILLAR_H*0.15 + rebarH/2, p.z+oz);
+      rMesh.castShadow=true;
+      foundationGroup.add(rMesh);
+    }
+
+    // ── Cruz de armadura no topo (malha horizontal de espera)
+    const hs=PILLAR_S*0.55;
+    const yArm=PILLAR_H+0.02;
     const gH=new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(p.x-hs,yRebar,p.z),
-      new THREE.Vector3(p.x+hs,yRebar,p.z)
+      new THREE.Vector3(p.x-hs,yArm,p.z),
+      new THREE.Vector3(p.x+hs,yArm,p.z)
     ]);
-    foundationGroup.add(new THREE.Line(gH,armMat));
+    foundationGroup.add(new THREE.Line(gH,mArmCruz));
     const gV=new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(p.x,yRebar,p.z-hs),
-      new THREE.Vector3(p.x,yRebar,p.z+hs)
+      new THREE.Vector3(p.x,yArm,p.z-hs),
+      new THREE.Vector3(p.x,yArm,p.z+hs)
     ]);
-    foundationGroup.add(new THREE.Line(gV,armMat));
-    // Diagonal (representação da malha de armadura)
-    const gD1=new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(p.x-hs*.7,yRebar,p.z-hs*.7),
-      new THREE.Vector3(p.x+hs*.7,yRebar,p.z+hs*.7)
-    ]);
-    foundationGroup.add(new THREE.Line(gD1,new THREE.LineBasicMaterial({color:0xe07820,opacity:.4,transparent:true})));
-    const gD2=new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(p.x+hs*.7,yRebar,p.z-hs*.7),
-      new THREE.Vector3(p.x-hs*.7,yRebar,p.z+hs*.7)
-    ]);
-    foundationGroup.add(new THREE.Line(gD2,new THREE.LineBasicMaterial({color:0xe07820,opacity:.4,transparent:true})));
+    foundationGroup.add(new THREE.Line(gV,mArmCruz));
   }
 
   scn.add(foundationGroup);
