@@ -770,187 +770,217 @@ function buildFoundationView(walls){
   const gcx=(x0+x1)/2, gcz=(z0+z1)/2;
   const pw=x1-x0+2.4, pd=z1-z0+2.4;
 
-  // ── Cotas (tudo acima de y=0, completamente visível)
-  const BEAM_W   = 0.42;   // largura da viga de fundação
-  const BEAM_H   = 0.32;   // altura da viga (sobressai do solo)
-  const PILLAR_S = 0.30;   // lado do pilar de arranque
-  const PILLAR_H = 0.90;   // altura do pilar (bem visível)
-  const REBAR_UP = 0.55;   // até que altura os varões sobem acima da viga
+  // ── Cotas
+  const BEAM_W   = 0.44;
+  const BEAM_H   = 0.34;
+  const PILLAR_S = 0.32;
+  const PILLAR_H = 0.95;
+  const REBAR_UP = 0.52;
+  const AXIS_TOL = 0.22; // tolerância para considerar dois segmentos na mesma linha
 
-  // ── SOLO — plano baixo, chão de terra
+  // ════════════════════════════════════════════════════
+  //  PASSO 1 — Juntar segmentos colineares em vigas
+  //  contínuas (ignora gaps de portas/janelas)
+  //  Lógica: agrupar por eixo (H→mesma z, V→mesma x),
+  //  depois esticar cada grupo do mínimo ao máximo.
+  // ════════════════════════════════════════════════════
+  function mergeToBeams(wallList, type){
+    const segs = wallList.filter(w=>w.t===type);
+    // chave do eixo: coordenada fixa arredondada
+    const groups = new Map();
+    for(const s of segs){
+      const key = type==='H'
+        ? Math.round(s.z1n / AXIS_TOL) // agrupar por Z
+        : Math.round(s.x1n / AXIS_TOL); // agrupar por X
+      if(!groups.has(key)) groups.set(key,[]);
+      groups.get(key).push(s);
+    }
+    const beams = [];
+    for(const [,grp] of groups){
+      if(type==='H'){
+        const z = grp.reduce((a,s)=>a+(s.z1n+s.z2n)/2,0)/grp.length; // Z médio do grupo
+        const minX = Math.min(...grp.map(s=>Math.min(s.x1n,s.x2n)));
+        const maxX = Math.max(...grp.map(s=>Math.max(s.x1n,s.x2n)));
+        beams.push({t:'H', x1:minX, z1:z, x2:maxX, z2:z,
+                    len:maxX-minX, cx:(minX+maxX)/2, cz:z,
+                    dx:1, dz:0, nx:0, nz:-1});
+      } else {
+        const x = grp.reduce((a,s)=>a+(s.x1n+s.x2n)/2,0)/grp.length;
+        const minZ = Math.min(...grp.map(s=>Math.min(s.z1n,s.z2n)));
+        const maxZ = Math.max(...grp.map(s=>Math.max(s.z1n,s.z2n)));
+        beams.push({t:'V', x1:x, z1:minZ, x2:x, z2:maxZ,
+                    len:maxZ-minZ, cx:x, cz:(minZ+maxZ)/2,
+                    dx:0, dz:1, nx:1, nz:0});
+      }
+    }
+    return beams;
+  }
+
+  const beamsH = mergeToBeams(walls,'H');
+  const beamsV = mergeToBeams(walls,'V');
+  const beams  = [...beamsH,...beamsV];
+
+  // ── SOLO
   const mSolo=new THREE.MeshStandardMaterial({color:0x4a3322,roughness:1,metalness:0});
   const soloPlane=new THREE.Mesh(new THREE.PlaneGeometry(pw+6,pd+6),mSolo);
   soloPlane.rotation.x=-Math.PI/2;
   soloPlane.position.set(gcx,-0.02,gcz);
   soloPlane.receiveShadow=true;
   foundationGroup.add(soloPlane);
-
-  // Grid de terra (visível, não tapado)
   const gridG=new THREE.GridHelper(Math.max(pw,pd)+5,22,0x6b4a2e,0x5a3d22);
   gridG.position.set(gcx,0,gcz);
   foundationGroup.add(gridG);
 
   // ── Materiais
-  const mBeam =new THREE.MeshStandardMaterial({color:0x7a7568,roughness:.88,metalness:.04}); // betão cinzento
-  const mBeamT=new THREE.MeshStandardMaterial({color:0x8a8578,roughness:.85,metalness:.04}); // topo mais claro
+  const mBeam =new THREE.MeshStandardMaterial({color:0x7a7568,roughness:.88,metalness:.04});
+  const mBeamT=new THREE.MeshStandardMaterial({color:0x8a8578,roughness:.85,metalness:.04});
   const mPillar=new THREE.MeshStandardMaterial({color:0x696058,roughness:.82,metalness:.06});
-  const mRebar =new THREE.MeshStandardMaterial({color:0xcc6600,roughness:.4,metalness:.85});  // aço laranja-ferrugem
-  const mRebarLine=new THREE.LineBasicMaterial({color:0xff8822,opacity:1,transparent:false});
-  const mStirrup  =new THREE.LineBasicMaterial({color:0xee7711,opacity:.9,transparent:true});
+  const mRebar =new THREE.MeshStandardMaterial({color:0xcc6600,roughness:.4,metalness:.85});
+  const mStirrup=new THREE.LineBasicMaterial({color:0xee7711,opacity:.9,transparent:true});
 
-  // ── VIGAS DE FUNDAÇÃO ao longo de cada parede (betão, emerges from ground)
-  for(const w of walls){
-    const dx=w.x2n-w.x1n, dz=w.z2n-w.z1n;
-    const len=Math.hypot(dx,dz);
-    if(len<.15)continue;
-    const wcx=(w.x1n+w.x2n)/2, wcz=(w.z1n+w.z2n)/2;
-    const angle=Math.atan2(dz,dx);
-    const nx=dz/len, nz=-dx/len; // normal da viga
+  // ════════════════════════════════════════════════════
+  //  PASSO 2 — Desenhar VIGAS CONTÍNUAS (sem gaps)
+  // ════════════════════════════════════════════════════
+  for(const b of beams){
+    if(b.len<.05)continue;
+    const angle = b.t==='H' ? 0 : Math.PI/2;
 
-    // Corpo principal da viga — assenta no chão, cresce para cima
+    // Corpo da viga
     const beamMesh=new THREE.Mesh(
-      new THREE.BoxGeometry(len, BEAM_H, BEAM_W), mBeam);
-    beamMesh.position.set(wcx, BEAM_H/2, wcz);
-    beamMesh.rotation.y=-angle;
+      new THREE.BoxGeometry(b.len+BEAM_W, BEAM_H, BEAM_W), mBeam);
+    beamMesh.position.set(b.cx, BEAM_H/2, b.cz);
+    beamMesh.rotation.y = angle;
     beamMesh.castShadow=true; beamMesh.receiveShadow=true;
     foundationGroup.add(beamMesh);
 
-    // Topo da viga (face superior mais clara — betão fresco)
+    // Topo mais claro
     const beamTop=new THREE.Mesh(
-      new THREE.BoxGeometry(len, 0.02, BEAM_W), mBeamT);
-    beamTop.position.set(wcx, BEAM_H+0.01, wcz);
-    beamTop.rotation.y=-angle;
+      new THREE.BoxGeometry(b.len+BEAM_W, 0.025, BEAM_W), mBeamT);
+    beamTop.position.set(b.cx, BEAM_H+0.012, b.cz);
+    beamTop.rotation.y=angle;
     foundationGroup.add(beamTop);
 
-    // Arestas da viga
-    const beamEdge=new THREE.EdgesGeometry(new THREE.BoxGeometry(len,BEAM_H,BEAM_W));
+    // Arestas
+    const beamEdge=new THREE.EdgesGeometry(
+      new THREE.BoxGeometry(b.len+BEAM_W,BEAM_H,BEAM_W));
     const beamEdgeMesh=new THREE.LineSegments(beamEdge,
-      new THREE.LineBasicMaterial({color:0xaaa090,opacity:.55,transparent:true}));
-    beamEdgeMesh.position.set(wcx,BEAM_H/2,wcz);
-    beamEdgeMesh.rotation.y=-angle;
+      new THREE.LineBasicMaterial({color:0xaaa090,opacity:.5,transparent:true}));
+    beamEdgeMesh.position.set(b.cx,BEAM_H/2,b.cz);
+    beamEdgeMesh.rotation.y=angle;
     foundationGroup.add(beamEdgeMesh);
 
-    // ── Armadura longitudinal — 4 varões saem da viga para cima (esperas de pilar)
-    // Espaçados regularmente ao longo da viga
-    const spacingRebar=0.55;
-    const numR=Math.max(3,Math.floor(len/spacingRebar));
-    const sideOff=BEAM_W*0.28;
+    // ── Varões longitudinais dentro da viga (emerges para cima)
+    const spacingR = 0.52;
+    const numR = Math.max(3, Math.floor(b.len/spacingR));
+    const sideOff = BEAM_W*0.28;
 
     for(let ri=0;ri<=numR;ri++){
       const t=(ri/numR)-.5;
-      const rx=wcx+dx*t, rz=wcz+dz*t;
-
+      const rx = b.cx + b.dx*b.len*t;
+      const rz = b.cz + b.dz*b.len*t;
       for(const side of[-1,1]){
-        const ox=nx*sideOff*side, oz=nz*sideOff*side;
-        // Varão como cilindro vertical que emerge da viga
-        const rGeo=new THREE.CylinderGeometry(0.018,0.018,BEAM_H+REBAR_UP,6);
+        const ox = b.nx*sideOff*side;
+        const oz = b.nz*sideOff*side;
+        const rGeo=new THREE.CylinderGeometry(0.017,0.017,BEAM_H+REBAR_UP,6);
         const rMesh=new THREE.Mesh(rGeo,mRebar);
-        rMesh.position.set(rx+ox, (BEAM_H+REBAR_UP)/2 - REBAR_UP*0.05, rz+oz);
+        rMesh.position.set(rx+ox,(BEAM_H+REBAR_UP)/2-REBAR_UP*0.05,rz+oz);
         rMesh.castShadow=true;
         foundationGroup.add(rMesh);
       }
     }
 
-    // ── Estribos visíveis a cada ~0.45 unidades — retângulos de arame laranja
-    const stirrupSpacing=0.48;
-    const numSt=Math.max(2,Math.floor(len/stirrupSpacing));
-    const sw=BEAM_W*0.55, sh=BEAM_H*0.72;
-    const sy0=BEAM_H*0.14; // começa perto do fundo
+    // ── Estribos
+    const spacingSt = 0.46;
+    const numSt = Math.max(2, Math.floor(b.len/spacingSt));
+    const sw=BEAM_W*0.52, sh=BEAM_H*0.74, sy0=BEAM_H*0.13;
 
     for(let si=0;si<=numSt;si++){
       const t=(si/numSt)-.5;
-      const sx=wcx+dx*t, sz=wcz+dz*t;
-      const pts=[
-        new THREE.Vector3(sx+nx*sw/2, sy0,      sz+nz*sw/2),
-        new THREE.Vector3(sx-nx*sw/2, sy0,      sz-nz*sw/2),
-        new THREE.Vector3(sx-nx*sw/2, sy0+sh,   sz-nz*sw/2),
-        new THREE.Vector3(sx+nx*sw/2, sy0+sh,   sz+nz*sw/2),
-        new THREE.Vector3(sx+nx*sw/2, sy0,      sz+nz*sw/2),
+      const sx = b.cx+b.dx*b.len*t;
+      const sz = b.cz+b.dz*b.len*t;
+      const p=[
+        new THREE.Vector3(sx+b.nx*sw/2, sy0,    sz+b.nz*sw/2),
+        new THREE.Vector3(sx-b.nx*sw/2, sy0,    sz-b.nz*sw/2),
+        new THREE.Vector3(sx-b.nx*sw/2, sy0+sh, sz-b.nz*sw/2),
+        new THREE.Vector3(sx+b.nx*sw/2, sy0+sh, sz+b.nz*sw/2),
+        new THREE.Vector3(sx+b.nx*sw/2, sy0,    sz+b.nz*sw/2),
       ];
       foundationGroup.add(new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints(pts), mStirrup));
+        new THREE.BufferGeometry().setFromPoints(p), mStirrup));
     }
   }
 
-  // ── PILARES DE ARRANQUE — nos pontos de encontro das paredes
-  // São os stubs de betão que irão receber as paredes
-  const pts=[];
-  for(const w of walls){
-    pts.push({x:w.x1n,z:w.z1n});
-    pts.push({x:w.x2n,z:w.z2n});
-  }
-  for(let i=0;i<walls.length;i++){
-    for(let j=i+1;j<walls.length;j++){
-      const a=walls[i],b=walls[j];
-      if(a.t===b.t)continue;
-      let ix,iz;
-      if(a.t==='H'&&b.t==='V'){
-        ix=b.x1n;iz=a.z1n;
-        const onA=ix>=Math.min(a.x1n,a.x2n)-.12&&ix<=Math.max(a.x1n,a.x2n)+.12;
-        const onB=iz>=Math.min(b.z1n,b.z2n)-.12&&iz<=Math.max(b.z1n,b.z2n)+.12;
-        if(onA&&onB)pts.push({x:ix,z:iz});
-      }else{
-        ix=a.x1n;iz=b.z1n;
-        const onA=iz>=Math.min(a.z1n,a.z2n)-.12&&iz<=Math.max(a.z1n,a.z2n)+.12;
-        const onB=ix>=Math.min(b.x1n,b.x2n)-.12&&ix<=Math.max(b.x1n,b.x2n)+.12;
-        if(onA&&onB)pts.push({x:ix,z:iz});
+  // ════════════════════════════════════════════════════
+  //  PASSO 3 — Pilares nos cruzamentos das vigas
+  //  (interseção de cada viga H com cada viga V)
+  // ════════════════════════════════════════════════════
+  const junctions=[];
+  for(const bh of beamsH){
+    for(const bv of beamsV){
+      // X do pilar = X da viga V, Z do pilar = Z da viga H
+      const px=bv.cx, pz=bh.cz;
+      // verificar que o ponto está dentro de ambas as vigas
+      const onH = px>=bh.x1-0.05 && px<=bh.x2+0.05;
+      const onV = pz>=bv.z1-0.05 && pz<=bv.z2+0.05;
+      if(onH&&onV){
+        if(!junctions.some(j=>Math.hypot(j.x-px,j.z-pz)<0.2))
+          junctions.push({x:px,z:pz});
       }
     }
   }
-  const unique=[];
-  for(const p of pts){
-    if(!unique.some(u=>Math.hypot(u.x-p.x,u.z-p.z)<0.28))unique.push(p);
+  // Adicionar extremidades livres de cada viga (terminações sem cruzamento)
+  for(const b of beams){
+    for(const pt of [{x:b.x1,z:b.z1},{x:b.x2,z:b.z2}]){
+      if(!junctions.some(j=>Math.hypot(j.x-pt.x,j.z-pt.z)<0.25))
+        junctions.push({x:pt.x,z:pt.z});
+    }
   }
 
   const mPillarTop=new THREE.MeshStandardMaterial({color:0x555048,roughness:.8,metalness:.08});
   const mRebarV   =new THREE.MeshStandardMaterial({color:0xdd5500,roughness:.35,metalness:.9});
   const mArmCruz  =new THREE.LineBasicMaterial({color:0xff9933,opacity:1,transparent:false});
 
-  for(const p of unique){
-    // Pilar de betão — cresce bem acima da viga
+  for(const p of junctions){
+    // Pilar de betão
     const pilMesh=new THREE.Mesh(
       new THREE.BoxGeometry(PILLAR_S,PILLAR_H,PILLAR_S), mPillar);
     pilMesh.position.set(p.x,PILLAR_H/2,p.z);
     pilMesh.castShadow=true; pilMesh.receiveShadow=true;
     foundationGroup.add(pilMesh);
 
-    // Capitel do pilar (topo ligeiramente alargado — padrão construtivo)
+    // Capitel
     const capMesh=new THREE.Mesh(
-      new THREE.BoxGeometry(PILLAR_S+0.1,0.06,PILLAR_S+0.1), mPillarTop);
-    capMesh.position.set(p.x,PILLAR_H+0.03,p.z);
+      new THREE.BoxGeometry(PILLAR_S+0.10,0.065,PILLAR_S+0.10), mPillarTop);
+    capMesh.position.set(p.x,PILLAR_H+0.032,p.z);
     foundationGroup.add(capMesh);
 
-    // Arestas do pilar
-    const pilEdge=new THREE.EdgesGeometry(new THREE.BoxGeometry(PILLAR_S,PILLAR_H,PILLAR_S));
+    // Arestas
+    const pilEdge=new THREE.EdgesGeometry(
+      new THREE.BoxGeometry(PILLAR_S,PILLAR_H,PILLAR_S));
     const pilEdgeMesh=new THREE.LineSegments(pilEdge,
-      new THREE.LineBasicMaterial({color:0x998880,opacity:.6,transparent:true}));
+      new THREE.LineBasicMaterial({color:0x998880,opacity:.55,transparent:true}));
     pilEdgeMesh.position.set(p.x,PILLAR_H/2,p.z);
     foundationGroup.add(pilEdgeMesh);
 
-    // ── 4 varões de aço saindo do topo do pilar (esperas para a parede acima)
-    const rebarOff=PILLAR_S*0.28;
-    const rebarH=0.55; // quanto sobem acima do pilar
-    for(const [ox,oz] of[[-rebarOff,-rebarOff],[rebarOff,-rebarOff],[-rebarOff,rebarOff],[rebarOff,rebarOff]]){
-      const rGeo=new THREE.CylinderGeometry(0.022,0.022,rebarH+PILLAR_H*0.3,6);
+    // 4 varões verticais saindo do topo
+    const ro=PILLAR_S*0.27, rebarH=0.52;
+    for(const[ox,oz]of[[-ro,-ro],[ro,-ro],[-ro,ro],[ro,ro]]){
+      const rGeo=new THREE.CylinderGeometry(0.022,0.022,rebarH+PILLAR_H*0.28,6);
       const rMesh=new THREE.Mesh(rGeo,mRebarV);
-      rMesh.position.set(p.x+ox, PILLAR_H - PILLAR_H*0.15 + rebarH/2, p.z+oz);
+      rMesh.position.set(p.x+ox, PILLAR_H-PILLAR_H*0.14+rebarH/2, p.z+oz);
       rMesh.castShadow=true;
       foundationGroup.add(rMesh);
     }
 
-    // ── Cruz de armadura no topo (malha horizontal de espera)
-    const hs=PILLAR_S*0.55;
-    const yArm=PILLAR_H+0.02;
-    const gH=new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(p.x-hs,yArm,p.z),
-      new THREE.Vector3(p.x+hs,yArm,p.z)
-    ]);
-    foundationGroup.add(new THREE.Line(gH,mArmCruz));
-    const gV=new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(p.x,yArm,p.z-hs),
-      new THREE.Vector3(p.x,yArm,p.z+hs)
-    ]);
-    foundationGroup.add(new THREE.Line(gV,mArmCruz));
+    // Cruz de armadura no topo
+    const hs=PILLAR_S*0.52, yArm=PILLAR_H+0.025;
+    [[p.x-hs,p.z,p.x+hs,p.z],[p.x,p.z-hs,p.x,p.z+hs]].forEach(([ax,az,bx,bz])=>{
+      foundationGroup.add(new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(ax,yArm,az),
+          new THREE.Vector3(bx,yArm,bz)
+        ]), mArmCruz));
+    });
   }
 
   scn.add(foundationGroup);
