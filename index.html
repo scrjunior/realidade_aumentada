@@ -791,84 +791,120 @@ function buildFoundationView(walls){
   const pw=gx1-gx0+3.0, pd=gz1-gz0+3.0;
 
   // ══════════════════════════════════════════════════════
-  //  PASSO 1 — JUNTAR SEGMENTOS EM VIGAS CONTÍNUAS
+  //  PASSO 1 — RECONSTRUÇÃO TOPOLÓGICA DE VIGAS CONTÍNUAS
   //
-  //  Para cada tipo (H ou V):
-  //   • agrupar todos os segmentos pelo valor do eixo fixo
-  //     (Z para H, X para V), com tolerância AXIS_TOL
-  //   • dentro de cada grupo, esticar do ponto min ao max
-  //     ⟹ a viga cobre toda a extensão SEM gaps
+  //  Problema: onde há portas/janelas o OpenCV não deteta
+  //  nenhum segmento → o merge nunca fecha o gap.
+  //
+  //  Solução em 3 fases:
+  //  A) Agrupar segmentos por eixo estrutural (H→Z, V→X)
+  //     com tolerância AXIS_TOL.
+  //  B) Para cada grupo, calcular o alcance total
+  //     (min → max) dos segmentos existentes.
+  //  C) EXTENSÃO: a partir dos extremos de cada grupo,
+  //     verificar se outra linha perpendicular está próxima
+  //     e estender a viga até esse limite — fechando
+  //     qualquer gap de porta que fique entre o fim do
+  //     último segmento detetado e o cruzamento real.
   // ══════════════════════════════════════════════════════
-  function mergeToBeams(wallList, type){
-    const segs = wallList.filter(w => w.t === type);
 
-    // --- Fase 1: agrupamento por eixo fixo
-    // Usamos clustering simples: começa com grupos vazios,
-    // testa se o segmento cabe num grupo existente (eixo fixo
-    // dentro de AXIS_TOL do centróide do grupo) ou cria novo.
-    const groups = []; // [{axisSum, axisCount, segs:[]}]
-
-    for(const s of segs){
-      const axisVal = type === 'H'
-        ? (s.z1n + s.z2n) / 2   // eixo fixo de H é Z
-        : (s.x1n + s.x2n) / 2;  // eixo fixo de V é X
-
-      // procurar grupo existente cujo centróide está dentro de AXIS_TOL
-      let found = null;
-      for(const g of groups){
-        const centroid = g.axisSum / g.axisCount;
-        if(Math.abs(centroid - axisVal) <= AXIS_TOL){ found = g; break; }
+  function buildStructuralBeams(wallList){
+    // ── A) Agrupar por eixo com clustering de centróide
+    function clusterByAxis(segs, type){
+      const groups = [];
+      for(const s of segs){
+        const axVal = type==='H' ? (s.z1n+s.z2n)/2 : (s.x1n+s.x2n)/2;
+        let best = null, bestDist = Infinity;
+        for(const g of groups){
+          const d = Math.abs(g.axisSum/g.axisCount - axVal);
+          if(d < AXIS_TOL && d < bestDist){ best=g; bestDist=d; }
+        }
+        if(!best){ best={axisSum:0,axisCount:0,segs:[]}; groups.push(best); }
+        best.axisSum+=axVal; best.axisCount+=1; best.segs.push(s);
       }
-      if(!found){
-        found = { axisSum: 0, axisCount: 0, segs: [] };
-        groups.push(found);
-      }
-      found.axisSum   += axisVal;
-      found.axisCount += 1;
-      found.segs.push(s);
+      return groups;
     }
 
-    // --- Fase 2: para cada grupo, construir viga do min ao max
-    const beams = [];
-    for(const g of groups){
-      if(g.segs.length === 0) continue;
+    const hGroups = clusterByAxis(wallList.filter(w=>w.t==='H'), 'H');
+    const vGroups = clusterByAxis(wallList.filter(w=>w.t==='V'), 'V');
 
-      // eixo fixo médio do grupo
+    // ── B) Calcular alcance bruto (min/max dos segmentos detetados)
+    function groupToRawBeam(g, type){
       const axisAvg = g.axisSum / g.axisCount;
-
-      if(type === 'H'){
-        // z fixo = axisAvg; x vai do mínimo ao máximo de todos os segmentos
-        const minX = Math.min(...g.segs.map(s => Math.min(s.x1n, s.x2n)));
-        const maxX = Math.max(...g.segs.map(s => Math.max(s.x1n, s.x2n)));
-        const len  = maxX - minX;
-        if(len < 0.1) continue;
-        beams.push({
-          t:'H', len,
-          x1:minX, z1:axisAvg, x2:maxX, z2:axisAvg,
-          cx:(minX+maxX)/2, cz:axisAvg,
-          // direcção unitária e normal
-          dx:1, dz:0, nx:0, nz:1
-        });
+      if(type==='H'){
+        const minX = Math.min(...g.segs.map(s=>Math.min(s.x1n,s.x2n)));
+        const maxX = Math.max(...g.segs.map(s=>Math.max(s.x1n,s.x2n)));
+        return {t:'H', axis:axisAvg, lo:minX, hi:maxX, dx:1,dz:0, nx:0,nz:1,
+                get cx(){return(this.lo+this.hi)/2}, get cz(){return this.axis},
+                get x1(){return this.lo}, get z1(){return this.axis},
+                get x2(){return this.hi}, get z2(){return this.axis},
+                get len(){return this.hi-this.lo}};
       } else {
-        // x fixo = axisAvg; z vai do mínimo ao máximo
-        const minZ = Math.min(...g.segs.map(s => Math.min(s.z1n, s.z2n)));
-        const maxZ = Math.max(...g.segs.map(s => Math.max(s.z1n, s.z2n)));
-        const len  = maxZ - minZ;
-        if(len < 0.1) continue;
-        beams.push({
-          t:'V', len,
-          x1:axisAvg, z1:minZ, x2:axisAvg, z2:maxZ,
-          cx:axisAvg, cz:(minZ+maxZ)/2,
-          dx:0, dz:1, nx:1, nz:0
-        });
+        const minZ = Math.min(...g.segs.map(s=>Math.min(s.z1n,s.z2n)));
+        const maxZ = Math.max(...g.segs.map(s=>Math.max(s.z1n,s.z2n)));
+        return {t:'V', axis:axisAvg, lo:minZ, hi:maxZ, dx:0,dz:1, nx:1,nz:0,
+                get cx(){return this.axis}, get cz(){return(this.lo+this.hi)/2},
+                get x1(){return this.axis}, get z1(){return this.lo},
+                get x2(){return this.axis}, get z2(){return this.hi},
+                get len(){return this.hi-this.lo}};
       }
     }
-    return beams;
+
+    const rawH = hGroups.map(g=>groupToRawBeam(g,'H')).filter(b=>b.len>0.1);
+    const rawV = vGroups.map(g=>groupToRawBeam(g,'V')).filter(b=>b.len>0.1);
+
+    // ── C) EXTENSÃO: fechar gaps de porta nos extremos
+    //
+    // Para cada viga H, verifica se o extremo esquerdo (lo)
+    // ou direito (hi) está "perto mas não alcança" uma viga V
+    // perpendicular. Se sim, estende até ao eixo dessa viga V.
+    // Idem para vigas V relativamente a vigas H.
+    //
+    // "Perto mas não alcança" = o extremo da viga está a
+    // menos de DOOR_GAP do eixo perpendicular, mas falta
+    // chegar lá (gap típico de porta: 0.6–1.2 unidades 3D).
+    const DOOR_GAP = 1.8; // unidades 3D — cobre portas largas
+
+    function extendBeams(beams, perps, type){
+      for(const b of beams){
+        // --- extremo baixo (lo)
+        for(const p of perps){
+          // o eixo da perp tem de estar dentro da faixa de b
+          // (ou seja, a viga perp "passa" pela projeção de b)
+          const inRange = p.lo <= b.axis+AXIS_TOL && p.hi >= b.axis-AXIS_TOL;
+          if(!inRange) continue;
+          const dist = b.lo - p.axis; // quanto falta do extremo lo até a perp
+          if(dist > 0 && dist <= DOOR_GAP){
+            b.lo = p.axis; // estender até ao eixo da perp
+          }
+        }
+        // --- extremo alto (hi)
+        for(const p of perps){
+          const inRange = p.lo <= b.axis+AXIS_TOL && p.hi >= b.axis-AXIS_TOL;
+          if(!inRange) continue;
+          const dist = p.axis - b.hi;
+          if(dist > 0 && dist <= DOOR_GAP){
+            b.hi = p.axis;
+          }
+        }
+      }
+    }
+
+    // Estender H em relação a V, e V em relação a H
+    extendBeams(rawH, rawV, 'H');
+    extendBeams(rawV, rawH, 'V');
+
+    // segunda passagem para gaps entre segmentos no meio da viga
+    // (porta no meio — os dois lados foram detetados mas há gap)
+    // → simplesmente o alcance min→max já cobre isso após extensão
+    // Mas corremos de novo para capturar casos encadeados:
+    extendBeams(rawH, rawV, 'H');
+    extendBeams(rawV, rawH, 'V');
+
+    return [...rawH, ...rawV];
   }
 
-  const beamsH = mergeToBeams(walls, 'H');
-  const beamsV = mergeToBeams(walls, 'V');
-  const beams  = [...beamsH, ...beamsV];
+  const beams = buildStructuralBeams(walls);
 
   // ── SOLO / vala de escavação
   const mSolo = new THREE.MeshStandardMaterial({color:0x3a2810,roughness:1,metalness:0});
@@ -1004,19 +1040,18 @@ function buildFoundationView(walls){
   //  pilares flutuantes onde não há cruzamento real.
   // ══════════════════════════════════════════════════════
   const junctions = [];
+  const finalBeamsH = beams.filter(b => b.t === 'H');
+  const finalBeamsV = beams.filter(b => b.t === 'V');
 
-  for(const bh of beamsH){
-    for(const bv of beamsV){
-      // ponto de cruzamento: x do pilar V, z do pilar H
-      const px = bv.cx;
-      const pz = bh.cz;
-
-      // verificar que o ponto cai dentro da extensão de ambas as vigas
-      const onH = px >= bh.x1 - 0.08 && px <= bh.x2 + 0.08;
-      const onV = pz >= bv.z1 - 0.08 && pz <= bv.z2 + 0.08;
-
+  for(const bh of finalBeamsH){
+    for(const bv of finalBeamsV){
+      // ponto de cruzamento: eixo X de V, eixo Z de H
+      const px = bv.axis;
+      const pz = bh.axis;
+      // verificar que o ponto cai dentro da extensão de ambas as vigas (após extensão de portas)
+      const onH = px >= bh.lo - 0.08 && px <= bh.hi + 0.08;
+      const onV = pz >= bv.lo - 0.08 && pz <= bv.hi + 0.08;
       if(onH && onV){
-        // evitar duplicados
         if(!junctions.some(j => Math.hypot(j.x - px, j.z - pz) < 0.18))
           junctions.push({x: px, z: pz});
       }
