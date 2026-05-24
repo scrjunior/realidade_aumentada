@@ -177,6 +177,33 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
   background:var(--surface);border:1px solid var(--border);border-radius:2px;line-height:1.7;white-space:pre-line;text-align:center}
 #cv-canvas{display:none}
 </style>
+<style id="auth-patch-styles">
+/* Barra de utilizador no topo do splash */
+.user-bar{
+  width:100%;max-width:360px;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 0;margin-bottom:.6rem;
+}
+.user-avatar{
+  display:flex;align-items:center;gap:9px;
+}
+.u-pic{
+  width:30px;height:30px;border-radius:50%;
+  background:rgba(200,57,43,.12);border:1.5px solid rgba(200,57,43,.3);
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:11px;font-weight:500;color:var(--red);flex-shrink:0;
+}
+.u-info{display:flex;flex-direction:column;gap:1px}
+.u-name{font-size:12px;font-weight:500;color:var(--paper)}
+.u-role{font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:var(--muted);text-transform:uppercase}
+.u-logout{
+  font-family:var(--mono);font-size:9px;letter-spacing:.1em;
+  color:var(--muted);background:none;border:1px solid var(--border);
+  padding:4px 9px;border-radius:2px;cursor:pointer;text-transform:uppercase;
+  transition:all .15s;
+}
+.u-logout:hover{color:var(--paper);border-color:var(--border2)}
+</style>
 </head>
 <body>
 
@@ -305,6 +332,67 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
   <button class="btn btn-o" style="max-width:280px;margin-top:.5rem" onclick="closeErr()">← Tentar novamente</button>
 </div>
 
+<script id="auth-patch-script">
+// ═══════════════════════════════════════════════════════
+//  AUTH MODULE — embutido no index.html
+// ═══════════════════════════════════════════════════════
+const Auth = (() => {
+  const USERS_KEY   = 'plantas_ar_users';
+  const SESSION_KEY = 'plantas_ar_session';
+ 
+  function getSession() {
+    try { return JSON.parse(localStorage.getItem(SESSION_KEY)); }
+    catch { return null; }
+  }
+  function isLoggedIn() { return !!getSession(); }
+  function logout() {
+    localStorage.removeItem(SESSION_KEY);
+    window.location.href = 'login.html';
+  }
+  return { getSession, isLoggedIn, logout };
+})();
+ 
+// ── Guarda de rota: se não há sessão → login.html
+(function routeGuard() {
+  if (!Auth.isLoggedIn()) {
+    window.location.replace('login.html');
+  }
+})();
+ 
+// ── Injeta barra de utilizador no splash
+function injectUserBar() {
+  const session = Auth.getSession();
+  if (!session) return;
+ 
+  const splash = document.getElementById('splash');
+  if (!splash) return;
+ 
+  const initials = session.name.trim().split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
+ 
+  const bar = document.createElement('div');
+  bar.className = 'user-bar';
+  bar.innerHTML = `
+    <div class="user-avatar">
+      <div class="u-pic">${initials}</div>
+      <div class="u-info">
+        <div class="u-name">${session.name}</div>
+        <div class="u-role">Utilizador</div>
+      </div>
+    </div>
+    <button class="u-logout" onclick="Auth.logout()">Sair</button>
+  `;
+ 
+  // Inserir antes do primeiro filho do splash
+  splash.insertBefore(bar, splash.firstChild);
+}
+ 
+// Executa após DOM estar pronto
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', injectUserBar);
+} else {
+  injectUserBar();
+}
+</script>
 <script>
 // ═══════════════════════════════════════════════════════
 //  ESTADO

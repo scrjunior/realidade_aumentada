@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Plantas AR — Entrar / Registar</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --ink:#0d0f14;--paper:#f2ede4;
+  --red:#c8392b;--red-dim:rgba(200,57,43,.12);--red-border:rgba(200,57,43,.28);
+  --green:#16a34a;--amber:#d97706;
+  --surface:rgba(242,237,228,.04);--surface2:rgba(242,237,228,.07);
+  --border:rgba(242,237,228,.09);--border2:rgba(242,237,228,.16);
+  --muted:#6b7280;--font:'DM Sans',sans-serif;--mono:'DM Mono',monospace;
+}
+html,body{
+  width:100%;min-height:100%;background:var(--ink);
+  font-family:var(--font);color:var(--paper);
+  -webkit-font-smoothing:antialiased;
+  display:flex;flex-direction:column;align-items:center;
+  padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0);
+}
+
+/* ── Layout ── */
+.page{
+  width:100%;max-width:400px;min-height:100vh;
+  display:flex;flex-direction:column;align-items:center;
+  justify-content:center;padding:2rem 1.5rem;
+}
+
+/* ── Brand ── */
+.brand{display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:2.2rem;text-align:center}
+.brand-icon{
+  width:52px;height:52px;border:1.5px solid var(--red);
+  display:flex;align-items:center;justify-content:center;
+  font-size:22px;position:relative;
+}
+.brand-icon::before{
+  content:'';position:absolute;inset:-5px;
+  border:1px solid rgba(200,57,43,.2);pointer-events:none;
+}
+.brand-tag{font-family:var(--mono);font-size:9.5px;letter-spacing:.22em;color:var(--red);text-transform:uppercase}
+.brand-name{font-size:18px;font-weight:600;color:var(--paper);letter-spacing:-.01em}
+
+/* ── Tabs ── */
+.tabs{display:flex;width:100%;border:1px solid var(--border);border-radius:2px;overflow:hidden;margin-bottom:1.8rem}
+.tab{
+  flex:1;padding:10px 8px;border:none;background:transparent;
+  font-family:var(--font);font-size:13px;font-weight:500;
+  color:var(--muted);cursor:pointer;transition:all .18s;text-align:center;
+}
+.tab.active{background:var(--red);color:#fff}
+.tab:not(.active):hover{background:var(--surface2);color:var(--paper)}
+
+/* ── Card ── */
+.card{
+  width:100%;background:var(--surface);
+  border:1px solid var(--border);border-radius:2px;
+  padding:1.5rem 1.4rem;display:flex;flex-direction:column;gap:14px;
+}
+
+/* ── Form ── */
+.field{display:flex;flex-direction:column;gap:5px}
+.label{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--muted);text-transform:uppercase}
+.input-wrap{position:relative}
+.input{
+  width:100%;padding:10px 12px;
+  background:rgba(242,237,228,.04);
+  border:1px solid var(--border2);border-radius:2px;
+  color:var(--paper);font-family:var(--font);font-size:14px;
+  outline:none;transition:border-color .15s, background .15s;
+  -webkit-appearance:none;
+}
+.input::placeholder{color:var(--muted);opacity:.7}
+.input:focus{border-color:var(--red);background:rgba(200,57,43,.05)}
+.input.error{border-color:rgba(200,57,43,.55)}
+.input[type="password"]{padding-right:42px}
+.toggle-pw{
+  position:absolute;right:10px;top:50%;transform:translateY(-50%);
+  background:none;border:none;color:var(--muted);cursor:pointer;
+  font-size:16px;padding:4px;line-height:1;
+}
+.toggle-pw:hover{color:var(--paper)}
+
+/* ── Força da senha ── */
+.pw-strength{display:flex;gap:4px;margin-top:4px}
+.pw-bar{height:2px;flex:1;border-radius:1px;background:var(--border);transition:background .2s}
+.pw-bar.weak{background:#c8392b}
+.pw-bar.medium{background:var(--amber)}
+.pw-bar.strong{background:var(--green)}
+.pw-label{font-size:10px;color:var(--muted);margin-top:2px;height:14px;transition:color .2s}
+
+/* ── Error box ── */
+.err-box{
+  display:none;padding:9px 12px;
+  background:rgba(200,57,43,.08);border:1px solid rgba(200,57,43,.25);
+  border-radius:2px;font-size:12px;color:#f87171;line-height:1.55;
+}
+.err-box.on{display:block}
+
+/* ── Success box ── */
+.ok-box{
+  display:none;padding:9px 12px;
+  background:rgba(22,163,74,.08);border:1px solid rgba(22,163,74,.25);
+  border-radius:2px;font-size:12px;color:#4ade80;line-height:1.55;
+}
+.ok-box.on{display:block}
+
+/* ── Submit ── */
+.btn-submit{
+  width:100%;padding:12px;border-radius:2px;border:none;
+  background:var(--red);color:#fff;
+  font-family:var(--font);font-size:14px;font-weight:500;
+  cursor:pointer;transition:all .15s;position:relative;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  min-height:46px;
+}
+.btn-submit:hover:not(:disabled){background:#a82d22}
+.btn-submit:active:not(:disabled){transform:scale(.98)}
+.btn-submit:disabled{opacity:.55;cursor:not-allowed}
+.spinner{
+  width:15px;height:15px;border:2px solid rgba(255,255,255,.3);
+  border-top-color:#fff;border-radius:50%;display:none;
+  animation:spin .7s linear infinite;
+}
+.btn-submit.loading .spinner{display:block}
+.btn-submit.loading .btn-txt{opacity:0;position:absolute}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Divisor ── */
+.divider{display:flex;align-items:center;gap:10px}
+.divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--border)}
+.divider span{font-family:var(--mono);font-size:9px;color:var(--muted);letter-spacing:.12em;text-transform:uppercase}
+
+/* ── Google (placeholder) ── */
+.btn-google{
+  width:100%;padding:10px;border-radius:2px;
+  border:1px solid var(--border2);background:transparent;
+  color:var(--paper);font-family:var(--font);font-size:13px;font-weight:400;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;
+  transition:all .15s;opacity:.55;
+}
+.btn-google:hover{background:var(--surface2)}
+.g-logo{font-size:15px}
+
+/* ── Notas ── */
+.note{font-size:11px;color:var(--muted);text-align:center;line-height:1.6}
+.note a{color:var(--red);text-decoration:none}
+
+/* ── Logged-in view ── */
+#logged-view{display:none;width:100%;flex-direction:column;align-items:center;gap:1.2rem;text-align:center}
+#logged-view.on{display:flex}
+.lv-avatar{
+  width:56px;height:56px;border-radius:50%;
+  background:var(--red-dim);border:1.5px solid var(--red-border);
+  display:flex;align-items:center;justify-content:center;
+  font-size:20px;font-weight:600;color:var(--red);font-family:var(--mono);
+}
+.lv-name{font-size:18px;font-weight:600}
+.lv-email{font-size:12px;color:var(--muted);font-family:var(--mono)}
+.lv-tag{
+  font-family:var(--mono);font-size:9px;letter-spacing:.18em;
+  color:var(--green);background:rgba(22,163,74,.1);
+  border:1px solid rgba(22,163,74,.2);padding:4px 12px;border-radius:2px;
+}
+.lv-row{display:flex;gap:8px;width:100%}
+.lv-btn{
+  flex:1;padding:11px 8px;border-radius:2px;border:1px solid var(--border2);
+  background:transparent;color:var(--paper);font-family:var(--font);font-size:13px;
+  cursor:pointer;transition:all .15s;
+}
+.lv-btn:hover{background:var(--surface2)}
+.lv-btn.primary{background:var(--red);border-color:transparent;color:#fff}
+.lv-btn.primary:hover{background:#a82d22}
+.lv-btn:active{transform:scale(.97)}
+
+/* ── Painel de formulários ── */
+#auth-view{width:100%;display:flex;flex-direction:column;gap:0}
+#auth-view.hidden{display:none}
+
+/* ── Animação de entrada ── */
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+.page > *{animation:fadeUp .38s ease both}
+.page > *:nth-child(1){animation-delay:.04s}
+.page > *:nth-child(2){animation-delay:.10s}
+.page > *:nth-child(3){animation-delay:.16s}
+.page > *:nth-child(4){animation-delay:.22s}
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <!-- Brand -->
+  <div class="brand">
+    <div class="brand-icon">📐</div>
+    <div class="brand-tag">Leitor de Plantas AR v3</div>
+    <div class="brand-name">Acesso à Conta</div>
+  </div>
+
+  <!-- Estado: Logged in -->
+  <div id="logged-view">
+    <div class="lv-avatar" id="lv-initials">?</div>
+    <div>
+      <div class="lv-name" id="lv-name">—</div>
+      <div class="lv-email" id="lv-email">—</div>
+    </div>
+    <div class="lv-tag">✓ Sessão ativa</div>
+    <div class="lv-row">
+      <button class="lv-btn primary" onclick="goToApp()">← Ir para a app</button>
+      <button class="lv-btn" onclick="doLogout()">Terminar sessão</button>
+    </div>
+    <p class="note">Os teus projetos ficam guardados neste dispositivo.</p>
+  </div>
+
+  <!-- Estado: Auth forms -->
+  <div id="auth-view">
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab active" id="tab-login" onclick="switchTab('login')">Entrar</button>
+      <button class="tab" id="tab-register" onclick="switchTab('register')">Criar conta</button>
+    </div>
+
+    <!-- ── FORM LOGIN ── -->
+    <div class="card" id="form-login">
+
+      <div class="err-box" id="login-err"></div>
+      <div class="ok-box"  id="login-ok"></div>
+
+      <div class="field">
+        <label class="label" for="l-email">Email</label>
+        <input class="input" id="l-email" type="email" placeholder="teu@email.com" autocomplete="email" inputmode="email">
+      </div>
+
+      <div class="field">
+        <label class="label" for="l-pw">Senha</label>
+        <div class="input-wrap">
+          <input class="input" id="l-pw" type="password" placeholder="••••••••" autocomplete="current-password">
+          <button class="toggle-pw" type="button" onclick="togglePw('l-pw',this)" aria-label="Mostrar/ocultar senha">👁</button>
+        </div>
+      </div>
+
+      <button class="btn-submit" id="btn-login" onclick="doLogin()">
+        <div class="spinner"></div>
+        <span class="btn-txt">Entrar</span>
+      </button>
+
+      <div class="divider"><span>ou</span></div>
+
+      <button class="btn-google" onclick="googleNotice()">
+        <span class="g-logo">🔵</span> Continuar com Google <span style="font-size:10px;color:var(--muted)">(em breve)</span>
+      </button>
+
+      <p class="note">Não tens conta? <a href="#" onclick="switchTab('register');return false">Regista-te grátis</a></p>
+    </div>
+
+    <!-- ── FORM REGISTO ── -->
+    <div class="card" id="form-register" style="display:none">
+
+      <div class="err-box" id="reg-err"></div>
+      <div class="ok-box"  id="reg-ok"></div>
+
+      <div class="field">
+        <label class="label" for="r-name">Nome completo</label>
+        <input class="input" id="r-name" type="text" placeholder="Ana Silva" autocomplete="name">
+      </div>
+
+      <div class="field">
+        <label class="label" for="r-email">Email</label>
+        <input class="input" id="r-email" type="email" placeholder="teu@email.com" autocomplete="email" inputmode="email">
+      </div>
+
+      <div class="field">
+        <label class="label" for="r-pw">Senha</label>
+        <div class="input-wrap">
+          <input class="input" id="r-pw" type="password" placeholder="Mínimo 6 caracteres" autocomplete="new-password" oninput="checkStrength(this.value)">
+          <button class="toggle-pw" type="button" onclick="togglePw('r-pw',this)" aria-label="Mostrar/ocultar senha">👁</button>
+        </div>
+        <div class="pw-strength">
+          <div class="pw-bar" id="pb1"></div>
+          <div class="pw-bar" id="pb2"></div>
+          <div class="pw-bar" id="pb3"></div>
+        </div>
+        <div class="pw-label" id="pw-label"></div>
+      </div>
+
+      <div class="field">
+        <label class="label" for="r-confirm">Confirmar senha</label>
+        <div class="input-wrap">
+          <input class="input" id="r-confirm" type="password" placeholder="Repete a senha" autocomplete="new-password">
+          <button class="toggle-pw" type="button" onclick="togglePw('r-confirm',this)" aria-label="Mostrar/ocultar senha">👁</button>
+        </div>
+      </div>
+
+      <button class="btn-submit" id="btn-reg" onclick="doRegister()">
+        <div class="spinner"></div>
+        <span class="btn-txt">Criar conta</span>
+      </button>
+
+      <p class="note" style="font-size:10.5px">
+        Ao registares, aceitas que os dados ficam armazenados localmente neste dispositivo.<br>
+        <a href="#" onclick="switchTab('login');return false">Já tens conta? Entra aqui</a>
+      </p>
+    </div>
+
+  </div>
+
+  <p class="note" style="margin-top:1.2rem">
+    <span style="font-family:var(--mono);font-size:9px;letter-spacing:.1em;color:rgba(107,114,128,.5)">
+      PLANTAS AR v3 · 100% offline · dados locais
+    </span>
+  </p>
+
+</div>
+
+<!-- Auth module inline (podes mover para auth.js externo) -->
+<script>
+// ═══════════════════════════════════════════════════════
+//  AUTH MODULE — inline
+// ═══════════════════════════════════════════════════════
+const Auth = (() => {
+  const USERS_KEY   = 'plantas_ar_users';
+  const SESSION_KEY = 'plantas_ar_session';
+
+  function getUsers() {
+    try { return JSON.parse(localStorage.getItem(USERS_KEY)) || []; }
+    catch { return []; }
+  }
+  function saveUsers(u) { localStorage.setItem(USERS_KEY, JSON.stringify(u)); }
+
+  async function hashPassword(pw) {
+    const buf = await crypto.subtle.digest(
+      'SHA-256', new TextEncoder().encode(pw + 'plantas_ar_salt_2024')
+    );
+    return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  }
+
+  function validateEmail(e) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e.trim()); }
+  function validatePassword(p) {
+    if (p.length < 6) return 'A senha deve ter pelo menos 6 caracteres.';
+    return null;
+  }
+
+  async function register({ name, email, password, confirmPassword }) {
+    if (!name || name.trim().length < 2) return { ok:false, error:'O nome deve ter pelo menos 2 caracteres.' };
+    if (!validateEmail(email)) return { ok:false, error:'Email inválido.' };
+    const perr = validatePassword(password);
+    if (perr) return { ok:false, error:perr };
+    if (password !== confirmPassword) return { ok:false, error:'As senhas não coincidem.' };
+    const users = getUsers();
+    if (users.find(u => u.email.toLowerCase() === email.trim().toLowerCase()))
+      return { ok:false, error:'Este email já está registado.' };
+    const hash = await hashPassword(password);
+    const newUser = {
+      id: crypto.randomUUID(),
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      passwordHash: hash,
+      createdAt: new Date().toISOString(),
+    };
+    users.push(newUser);
+    saveUsers(users);
+    const session = { userId:newUser.id, name:newUser.name, email:newUser.email, loginAt:new Date().toISOString() };
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    return { ok:true, user:{ id:newUser.id, name:newUser.name, email:newUser.email } };
+  }
+
+  async function login({ email, password }) {
+    if (!validateEmail(email)) return { ok:false, error:'Email inválido.' };
+    if (!password) return { ok:false, error:'Introduz a senha.' };
+    const users = getUsers();
+    const user = users.find(u => u.email === email.trim().toLowerCase());
+    if (!user) return { ok:false, error:'Email ou senha incorretos.' };
+    const hash = await hashPassword(password);
+    if (hash !== user.passwordHash) return { ok:false, error:'Email ou senha incorretos.' };
+    const session = { userId:user.id, name:user.name, email:user.email, loginAt:new Date().toISOString() };
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    return { ok:true, user:{ id:user.id, name:user.name, email:user.email } };
+  }
+
+  function logout() { localStorage.removeItem(SESSION_KEY); }
+  function getSession() {
+    try { return JSON.parse(localStorage.getItem(SESSION_KEY)); }
+    catch { return null; }
+  }
+  function isLoggedIn() { return !!getSession(); }
+
+  return { register, login, logout, getSession, isLoggedIn };
+})();
+
+// ═══════════════════════════════════════════════════════
+//  UI HELPERS
+// ═══════════════════════════════════════════════════════
+function switchTab(t) {
+  document.getElementById('tab-login').classList.toggle('active', t==='login');
+  document.getElementById('tab-register').classList.toggle('active', t==='register');
+  document.getElementById('form-login').style.display    = t==='login'    ? 'flex' : 'none';
+  document.getElementById('form-register').style.display = t==='register' ? 'flex' : 'none';
+  clearMsgs();
+}
+
+function showErr(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.classList.add('on');
+}
+function showOk(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.classList.add('on');
+}
+function clearMsgs() {
+  ['login-err','login-ok','reg-err','reg-ok'].forEach(id => {
+    const el = document.getElementById(id);
+    el.classList.remove('on');
+    el.textContent = '';
+  });
+}
+
+function setLoading(btnId, on) {
+  const btn = document.getElementById(btnId);
+  btn.classList.toggle('loading', on);
+  btn.disabled = on;
+}
+
+function togglePw(inputId, btn) {
+  const inp = document.getElementById(inputId);
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+  btn.textContent = inp.type === 'password' ? '👁' : '🙈';
+}
+
+function checkStrength(pw) {
+  const bars  = ['pb1','pb2','pb3'].map(id=>document.getElementById(id));
+  const label = document.getElementById('pw-label');
+  bars.forEach(b => { b.className='pw-bar'; });
+
+  if (!pw) { label.textContent=''; label.style.color=''; return; }
+
+  let score = 0;
+  if (pw.length >= 6)  score++;
+  if (pw.length >= 10) score++;
+  if (/[A-Z]/.test(pw) || /\d/.test(pw) || /[^a-z]/i.test(pw)) score++;
+
+  const levels = [
+    { cls:'weak',   text:'Fraca',    color:'#f87171' },
+    { cls:'medium', text:'Média',    color:var_amber() },
+    { cls:'strong', text:'Forte',    color:'#4ade80' },
+  ];
+
+  score = Math.max(1, score);
+  const lvl = levels[score - 1];
+  for (let i = 0; i < score; i++) { bars[i].classList.add(lvl.cls); }
+  label.textContent = lvl.text;
+  label.style.color = lvl.color;
+}
+
+function var_amber() { return '#d97706'; } // fallback since CSS vars not reachable in JS here
+
+function googleNotice() {
+  showErr('login-err', 'Login com Google ainda não disponível. Em breve!');
+}
+
+// ── Enter para submeter
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Enter') return;
+  const loginVisible = document.getElementById('form-login').style.display !== 'none';
+  if (loginVisible) doLogin();
+  else doRegister();
+});
+
+// ═══════════════════════════════════════════════════════
+//  AÇÕES
+// ═══════════════════════════════════════════════════════
+async function doLogin() {
+  clearMsgs();
+  const email    = document.getElementById('l-email').value;
+  const password = document.getElementById('l-pw').value;
+
+  setLoading('btn-login', true);
+  const res = await Auth.login({ email, password });
+  setLoading('btn-login', false);
+
+  if (!res.ok) {
+    showErr('login-err', res.error);
+    document.getElementById('l-pw').classList.add('error');
+    setTimeout(() => document.getElementById('l-pw').classList.remove('error'), 2000);
+    return;
+  }
+
+  showOk('login-ok', `✓ Bem-vindo de volta, ${res.user.name}! A redirecionar...`);
+  setTimeout(() => goToApp(), 1200);
+}
+
+async function doRegister() {
+  clearMsgs();
+  const name            = document.getElementById('r-name').value;
+  const email           = document.getElementById('r-email').value;
+  const password        = document.getElementById('r-pw').value;
+  const confirmPassword = document.getElementById('r-confirm').value;
+
+  setLoading('btn-reg', true);
+  const res = await Auth.register({ name, email, password, confirmPassword });
+  setLoading('btn-reg', false);
+
+  if (!res.ok) {
+    showErr('reg-err', res.error);
+    return;
+  }
+
+  showOk('reg-ok', `✓ Conta criada! Bem-vindo/a, ${res.user.name}! A redirecionar...`);
+  setTimeout(() => goToApp(), 1400);
+}
+
+function doLogout() {
+  Auth.logout();
+  renderPage();
+}
+
+function goToApp() {
+  // Ajusta o caminho conforme a estrutura do teu projeto
+  window.location.href = 'index.html';
+}
+
+// ═══════════════════════════════════════════════════════
+//  RENDER — decide o que mostrar conforme sessão
+// ═══════════════════════════════════════════════════════
+function getInitials(name) {
+  return name.trim().split(' ').map(w=>w[0]).join('').substring(0,2).toUpperCase();
+}
+
+function renderPage() {
+  const session = Auth.getSession();
+  const authView   = document.getElementById('auth-view');
+  const loggedView = document.getElementById('logged-view');
+
+  if (session) {
+    authView.classList.add('hidden');
+    loggedView.classList.add('on');
+    document.getElementById('lv-initials').textContent = getInitials(session.name);
+    document.getElementById('lv-name').textContent     = session.name;
+    document.getElementById('lv-email').textContent    = session.email;
+  } else {
+    authView.classList.remove('hidden');
+    loggedView.classList.remove('on');
+  }
+}
+
+// ── Init
+renderPage();
+</script>
+</body>
+</html>
