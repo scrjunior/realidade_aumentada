@@ -128,12 +128,13 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
   background:linear-gradient(to top,rgba(13,15,20,.96) 65%,transparent);
   padding:12px 12px 30px;display:flex;flex-direction:column;gap:8px}
 .v3-label{font-family:var(--mono);font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}
-.v3-row{display:flex;gap:5px}
+.v3-row{display:flex;gap:5px;flex-wrap:wrap}
 .v3-btn{flex:1;padding:9px 4px;border-radius:2px;border:1px solid var(--border);
   background:var(--surface);color:var(--paper);font-family:var(--font);
-  font-size:11px;font-weight:500;cursor:pointer;text-align:center;transition:all .12s}
+  font-size:11px;font-weight:500;cursor:pointer;text-align:center;transition:all .12s;min-width:58px}
 .v3-btn.on{background:rgba(200,57,43,.12);border-color:rgba(200,57,43,.35);color:var(--red)}
 .v3-btn.on-earth{background:rgba(139,94,60,.18);border-color:rgba(139,94,60,.5);color:#c49a6c}
+.v3-btn.on-roof{background:rgba(185,92,35,.16);border-color:rgba(211,118,45,.45);color:#e08a3e}
 .v3-btn:active{transform:scale(.96)}
 .v3-btn .ic{font-size:15px;display:block;margin-bottom:2px}
 .stats{background:var(--surface);border:1px solid var(--border);border-radius:2px;
@@ -301,6 +302,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
       <button class="v3-btn" id="vb-top" onclick="set3dView('top')"><span class="ic">🗺️</span>Topo</button>
       <button class="v3-btn" id="vb-wf" onclick="toggleWF()"><span class="ic">⬡</span>Malha</button>
       <button class="v3-btn" id="vb-found" onclick="toggleFoundation()"><span class="ic">🪨</span>Fundação</button>
+      <button class="v3-btn" id="vb-roof" onclick="toggleRoof()"><span class="ic">⌂</span>Cobertura</button>
       <button class="v3-btn" id="vb-new" onclick="goBackCam()"><span class="ic">📷</span>Nova</button>
     </div>
     <div class="stats" id="stats-box">
@@ -398,7 +400,7 @@ if (document.readyState === 'loading') {
 //  ESTADO
 // ═══════════════════════════════════════════════════════
 let cvReady=false, stream=null, captured=null;
-let ren=null, scn=null, cam=null, hg=null, animId=null, isWF=false, isFoundation=false, curView='3d';
+let ren=null, scn=null, cam=null, hg=null, animId=null, isWF=false, isFoundation=false, isRoof=false, curView='3d';
 let orb={rotX:-.32,rotY:.4,scale:1,down:false,last:{x:0,y:0},pinchDist:0};
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 
@@ -742,9 +744,10 @@ function build3D(data){
   el('s-res').textContent=data.res;
   el('s-raw').textContent=data.rawCount;
 
-  isFoundation=false;isWF=false;
+  isFoundation=false;isWF=false;isRoof=false;roofGroup=null;
   el('vb-found').classList.remove('on','on-earth');
   el('vb-wf').classList.remove('on');
+  el('vb-roof').classList.remove('on','on-roof');
 
   const canvas=el('c3d');
   canvas.width=window.innerWidth;canvas.height=window.innerHeight;
@@ -788,6 +791,17 @@ function build3D(data){
 }
 
 let lastWalls=[];
+let roofGroup=null;
+
+function getWallBounds(walls){
+  let x0=Infinity,x1=-Infinity,z0=Infinity,z1=-Infinity;
+  for(const w of walls){
+    x0=Math.min(x0,w.x1n,w.x2n);x1=Math.max(x1,w.x1n,w.x2n);
+    z0=Math.min(z0,w.z1n,w.z2n);z1=Math.max(z1,w.z1n,w.z2n);
+  }
+  if(!Number.isFinite(x0)||!Number.isFinite(z0))return null;
+  return {x0,x1,z0,z1,w:x1-x0,d:z1-z0,cx:(x0+x1)/2,cz:(z0+z1)/2};
+}
 
 function buildWalls(walls){
   lastWalls=walls;
@@ -837,6 +851,158 @@ function buildWalls(walls){
 
   if(isWF)applyPillarView(true,walls);
   scn.add(hg);
+}
+
+function addRoofPlane(group, pts, mat){
+  const geo=new THREE.BufferGeometry().setFromPoints(pts);
+  geo.setIndex([0,1,2,2,1,3]);
+  geo.computeVertexNormals();
+  const mesh=new THREE.Mesh(geo,mat);
+  mesh.castShadow=true;mesh.receiveShadow=true;
+  group.add(mesh);
+  const edge=new THREE.LineSegments(
+    new THREE.EdgesGeometry(geo),
+    new THREE.LineBasicMaterial({color:0xffc58a,opacity:.36,transparent:true})
+  );
+  group.add(edge);
+}
+
+function addRoofTileLines(group,bounds,ridgeAlongX,yBase,yPeak,eave){
+  const lineMat=new THREE.LineBasicMaterial({color:0x6f2f1b,opacity:.32,transparent:true});
+  const lines=[];
+  const rows=6;
+  if(ridgeAlongX){
+    const zNear=bounds.z0-eave, zFar=bounds.z1+eave, zMid=bounds.cz;
+    for(let i=1;i<rows;i++){
+      const t=i/rows;
+      for(const side of [-1,1]){
+        const z=side<0 ? zNear+(zMid-zNear)*t : zFar+(zMid-zFar)*t;
+        const y=yBase+(yPeak-yBase)*t+.012;
+        lines.push(new THREE.Vector3(bounds.x0-eave,y,z),new THREE.Vector3(bounds.x1+eave,y,z));
+      }
+    }
+    const cols=Math.max(5,Math.round(bounds.w/1.2));
+    for(let i=0;i<=cols;i++){
+      const x=bounds.x0-eave+(bounds.w+2*eave)*(i/cols);
+      lines.push(new THREE.Vector3(x,yBase+.018,zNear),new THREE.Vector3(x,yPeak+.018,zMid));
+      lines.push(new THREE.Vector3(x,yBase+.018,zFar),new THREE.Vector3(x,yPeak+.018,zMid));
+    }
+  }else{
+    const xNear=bounds.x0-eave, xFar=bounds.x1+eave, xMid=bounds.cx;
+    for(let i=1;i<rows;i++){
+      const t=i/rows;
+      for(const side of [-1,1]){
+        const x=side<0 ? xNear+(xMid-xNear)*t : xFar+(xMid-xFar)*t;
+        const y=yBase+(yPeak-yBase)*t+.012;
+        lines.push(new THREE.Vector3(x,y,bounds.z0-eave),new THREE.Vector3(x,y,bounds.z1+eave));
+      }
+    }
+    const cols=Math.max(5,Math.round(bounds.d/1.2));
+    for(let i=0;i<=cols;i++){
+      const z=bounds.z0-eave+(bounds.d+2*eave)*(i/cols);
+      lines.push(new THREE.Vector3(xNear,yBase+.018,z),new THREE.Vector3(xMid,yPeak+.018,z));
+      lines.push(new THREE.Vector3(xFar,yBase+.018,z),new THREE.Vector3(xMid,yPeak+.018,z));
+    }
+  }
+  group.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(lines),lineMat));
+}
+
+function buildRoofView(walls){
+  if(roofGroup){scn.remove(roofGroup);roofGroup=null;}
+  const bounds=getWallBounds(walls);
+  if(!bounds||bounds.w<.4||bounds.d<.4)return;
+
+  roofGroup=new THREE.Group();
+  const WALL_H=2.8;
+  const yBase=WALL_H+.18;
+  const eave=.42;
+  const yPeak=yBase+Math.max(.65,Math.min(1.35,Math.min(bounds.w,bounds.d)*.28));
+  const ridgeAlongX=bounds.w>=bounds.d;
+
+  const mRoof=new THREE.MeshStandardMaterial({color:0xb95c23,roughness:.72,metalness:.05,side:THREE.DoubleSide});
+  const mGable=new THREE.MeshStandardMaterial({color:0x8f4a25,roughness:.86,metalness:0,side:THREE.DoubleSide});
+  const mWood=new THREE.MeshStandardMaterial({color:0x6b3d1f,roughness:.82,metalness:0});
+
+  if(ridgeAlongX){
+    const z0=bounds.z0-eave,z1=bounds.z1+eave,zc=bounds.cz;
+    const x0=bounds.x0-eave,x1=bounds.x1+eave;
+    addRoofPlane(roofGroup,[
+      new THREE.Vector3(x0,yBase,z0),new THREE.Vector3(x1,yBase,z0),
+      new THREE.Vector3(x0,yPeak,zc),new THREE.Vector3(x1,yPeak,zc)
+    ],mRoof);
+    addRoofPlane(roofGroup,[
+      new THREE.Vector3(x1,yBase,z1),new THREE.Vector3(x0,yBase,z1),
+      new THREE.Vector3(x1,yPeak,zc),new THREE.Vector3(x0,yPeak,zc)
+    ],mRoof);
+    for(const x of [x0,x1]){
+      const geo=new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(x,yBase,z0),new THREE.Vector3(x,yBase,z1),new THREE.Vector3(x,yPeak,zc)
+      ]);
+      geo.setIndex([0,1,2]);geo.computeVertexNormals();
+      roofGroup.add(new THREE.Mesh(geo,mGable));
+    }
+    const ridge=new THREE.Mesh(new THREE.CylinderGeometry(.055,.055,bounds.w+2*eave,12),mWood);
+    ridge.rotation.z=Math.PI/2;ridge.position.set(bounds.cx,yPeak+.035,zc);roofGroup.add(ridge);
+  }else{
+    const x0=bounds.x0-eave,x1=bounds.x1+eave,xc=bounds.cx;
+    const z0=bounds.z0-eave,z1=bounds.z1+eave;
+    addRoofPlane(roofGroup,[
+      new THREE.Vector3(x0,yBase,z1),new THREE.Vector3(x0,yBase,z0),
+      new THREE.Vector3(xc,yPeak,z1),new THREE.Vector3(xc,yPeak,z0)
+    ],mRoof);
+    addRoofPlane(roofGroup,[
+      new THREE.Vector3(x1,yBase,z0),new THREE.Vector3(x1,yBase,z1),
+      new THREE.Vector3(xc,yPeak,z0),new THREE.Vector3(xc,yPeak,z1)
+    ],mRoof);
+    for(const z of [z0,z1]){
+      const geo=new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(x0,yBase,z),new THREE.Vector3(x1,yBase,z),new THREE.Vector3(xc,yPeak,z)
+      ]);
+      geo.setIndex([0,1,2]);geo.computeVertexNormals();
+      roofGroup.add(new THREE.Mesh(geo,mGable));
+    }
+    const ridge=new THREE.Mesh(new THREE.CylinderGeometry(.055,.055,bounds.d+2*eave,12),mWood);
+    ridge.rotation.x=Math.PI/2;ridge.position.set(xc,yPeak+.035,bounds.cz);roofGroup.add(ridge);
+  }
+
+  addRoofTileLines(roofGroup,bounds,ridgeAlongX,yBase,yPeak,eave);
+  scn.add(roofGroup);
+}
+
+function showRoof(walls){
+  buildRoofView(walls);
+  el('v3-title-label').textContent='Estrutura 3D + Cobertura';
+  el('v3-info').style.color='#e08a3e';
+  el('v3-info').style.background='rgba(185,92,35,.12)';
+  el('v3-info').style.borderColor='rgba(211,118,45,.35)';
+  el('v3-info').textContent='Cobertura de duas águas';
+}
+
+function hideRoof(){
+  if(roofGroup){scn.remove(roofGroup);roofGroup=null;}
+  el('v3-title-label').textContent='Estrutura 3D';
+  el('v3-info').style.color='';
+  el('v3-info').style.background='';
+  el('v3-info').style.borderColor='';
+  el('v3-info').textContent=lastWalls.length+' paredes';
+}
+
+function toggleRoof(){
+  if(isFoundation){ toggleFoundation(); }
+  if(isWF){
+    isWF=false;
+    el('vb-wf').classList.remove('on');
+    applyPillarView(false,lastWalls);
+  }
+  isRoof=!isRoof;
+  el('vb-roof').classList.toggle('on-roof',isRoof);
+  el('vb-roof').classList.remove('on');
+  if(isRoof){
+    showRoof(lastWalls);
+    set3dView('3d',false);
+  }else{
+    hideRoof();
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1235,6 +1401,11 @@ function hideFoundation(){
 }
 
 function toggleFoundation(){
+  if(isRoof){
+    isRoof=false;
+    el('vb-roof').classList.remove('on','on-roof');
+    hideRoof();
+  }
   isFoundation = !isFoundation;
   if(isFoundation && isWF){
     isWF = false;
@@ -1395,6 +1566,7 @@ function set3dView(v,_=true){
   curView=v;
   document.querySelectorAll('.v3-btn').forEach(b=>b.classList.remove('on'));
   if(isFoundation)el('vb-found').classList.add('on-earth');
+  if(isRoof)el('vb-roof').classList.add('on-roof');
   if(isWF)el('vb-wf').classList.add('on');
   if(v==='3d'){orb.rotX=isFoundation?-.48:-.32;orb.rotY=isFoundation?.55:.35;orb.scale=1;el('vb-3d').classList.add('on');}
   else if(v==='top'){el('vb-top').classList.add('on');}
@@ -1402,6 +1574,7 @@ function set3dView(v,_=true){
 
 function toggleWF(){
   if(isFoundation){ toggleFoundation(); }
+  if(isRoof){ toggleRoof(); }
   isWF=!isWF;
   el('vb-wf').classList.toggle('on',isWF);
   applyPillarView(isWF,lastWalls);
