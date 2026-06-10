@@ -306,7 +306,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
     <div class="v3-row">
       <button class="v3-btn on" id="vb-3d" onclick="set3dView('3d')"><span class="ic">🏠</span>3D</button>
       <button class="v3-btn" id="vb-top" onclick="set3dView('top')"><span class="ic">🗺️</span>Topo</button>
-      <button class="v3-btn" id="vb-wf" onclick="toggleWF()"><span class="ic">⬡</span>Malha</button>
+      <button class="v3-btn" id="vb-wf" onclick="toggleWF()"><span class="ic">▥</span>Pilares</button>
       <button class="v3-btn" id="vb-found" onclick="toggleFoundation()"><span class="ic">🪨</span>Fundação</button>
       <button class="v3-btn" id="vb-roof" onclick="toggleRoof()"><span class="ic">⌂</span>Cobertura</button>
       <button class="v3-btn" id="vb-new" onclick="goBackCam()"><span class="ic">📷</span>Nova</button>
@@ -1549,7 +1549,7 @@ function toggleFoundation(){
 }
 
 // ─────────────────────────────────────────────────────
-//  VISTA MALHA (pilares estruturais acima do solo)
+//  VISTA PILARES (estrutura acima do solo)
 // ─────────────────────────────────────────────────────
 let pillarGroup=null;
 
@@ -1562,9 +1562,13 @@ function applyPillarView(show,walls){
     pillarGroup=new THREE.Group();
 
     const WALL_H=2.8;
-    const PILLAR_S=0.22;
-    const mPillar=new THREE.MeshStandardMaterial({color:0xc8392b,roughness:.5,metalness:.15});
-    const mPillarTop=new THREE.MeshStandardMaterial({color:0xa02020,roughness:.4,metalness:.2});
+    const PILLAR_S=0.30;
+    const PILLAR_BASE=0.48;
+    const mPillar=new THREE.MeshStandardMaterial({color:0x77716a,roughness:.82,metalness:.05});
+    const mPillarTop=new THREE.MeshStandardMaterial({color:0x5f5a54,roughness:.78,metalness:.08});
+    const mRebar=new THREE.MeshStandardMaterial({color:0xdd5500,roughness:.35,metalness:.9});
+    const mEdge=new THREE.LineBasicMaterial({color:0xb8aa98,opacity:.52,transparent:true});
+    const mArm=new THREE.LineBasicMaterial({color:0xff8a33,opacity:.9,transparent:true});
 
     const pts=[];
     for(const w of walls){
@@ -1595,27 +1599,52 @@ function applyPillarView(show,walls){
     }
 
     const geoBody=new THREE.BoxGeometry(PILLAR_S,WALL_H,PILLAR_S);
-    const geoTop=new THREE.BoxGeometry(PILLAR_S+.06,.05,PILLAR_S+.06);
-    const geoBase=new THREE.BoxGeometry(PILLAR_S+.06,.04,PILLAR_S+.06);
+    const geoTop=new THREE.BoxGeometry(PILLAR_S+.10,.07,PILLAR_S+.10);
+    const geoBase=new THREE.BoxGeometry(PILLAR_BASE,.12,PILLAR_BASE);
     for(const p of unique){
+      const base=new THREE.Mesh(geoBase,mPillar);
+      base.position.set(p.x,.06,p.z);
+      base.castShadow=true;base.receiveShadow=true;
+      pillarGroup.add(base);
+
       const body=new THREE.Mesh(geoBody,mPillar);
       body.position.set(p.x,WALL_H/2,p.z);
       body.castShadow=true;body.receiveShadow=true;
       pillarGroup.add(body);
+
       const top=new THREE.Mesh(geoTop,mPillarTop);
-      top.position.set(p.x,WALL_H+.025,p.z);
+      top.position.set(p.x,WALL_H+.035,p.z);
       pillarGroup.add(top);
-      const base=new THREE.Mesh(geoBase,mPillarTop);
-      base.position.set(p.x,.02,p.z);
-      pillarGroup.add(base);
+
       const edgeGeo=new THREE.EdgesGeometry(geoBody);
-      const edgeMesh=new THREE.LineSegments(edgeGeo,new THREE.LineBasicMaterial({color:0xff6b55,opacity:.6,transparent:true}));
+      const edgeMesh=new THREE.LineSegments(edgeGeo,mEdge);
       edgeMesh.position.set(p.x,WALL_H/2,p.z);
       pillarGroup.add(edgeMesh);
+
+      const ro=PILLAR_S*.26;
+      for(const [ox,oz] of [[-ro,-ro],[ro,-ro],[-ro,ro],[ro,ro]]){
+        const rMesh=new THREE.Mesh(new THREE.CylinderGeometry(.018,.018,.62,6),mRebar);
+        rMesh.position.set(p.x+ox,WALL_H+.28,p.z+oz);
+        rMesh.castShadow=true;
+        pillarGroup.add(rMesh);
+      }
+
+      const hs=PILLAR_S*.64;
+      const yArm=WALL_H+.08;
+      [
+        [p.x-hs,p.z,p.x+hs,p.z],
+        [p.x,p.z-hs,p.x,p.z+hs]
+      ].forEach(([ax,az,bx,bz])=>{
+        pillarGroup.add(new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(ax,yArm,az),
+            new THREE.Vector3(bx,yArm,bz)
+          ]),mArm));
+      });
     }
 
-    const lineMat=new THREE.LineBasicMaterial({color:0xc8392b,opacity:.45,transparent:true});
-    const lineMat2=new THREE.LineBasicMaterial({color:0xc8392b,opacity:.25,transparent:true});
+    const lineMat=new THREE.LineBasicMaterial({color:0xb8aa98,opacity:.42,transparent:true});
+    const lineMat2=new THREE.LineBasicMaterial({color:0x8a8070,opacity:.28,transparent:true});
     for(const w of walls){
       const onWall=unique.filter(p=>{
         if(w.t==='H'){
@@ -1704,6 +1733,19 @@ function toggleWF(){
   isWF=!isWF;
   el('vb-wf').classList.toggle('on',isWF);
   applyPillarView(isWF,lastWalls);
+  if(isWF){
+    el('v3-title-label').textContent='Vista Pilares';
+    el('v3-info').style.color='#b8aa98';
+    el('v3-info').style.background='rgba(120,113,106,.14)';
+    el('v3-info').style.borderColor='rgba(184,170,152,.32)';
+    el('v3-info').textContent='Pilares + armadura';
+  }else{
+    el('v3-title-label').textContent='Estrutura 3D';
+    el('v3-info').style.color='';
+    el('v3-info').style.background='';
+    el('v3-info').style.borderColor='';
+    el('v3-info').textContent=lastWalls.length+' paredes';
+  }
 }
 
 window.addEventListener('resize',()=>{
