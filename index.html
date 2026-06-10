@@ -1569,6 +1569,8 @@ function applyPillarView(show,walls){
     const mRebar=new THREE.MeshStandardMaterial({color:0xdd5500,roughness:.35,metalness:.9});
     const mEdge=new THREE.LineBasicMaterial({color:0xb8aa98,opacity:.52,transparent:true});
     const mArm=new THREE.LineBasicMaterial({color:0xff8a33,opacity:.9,transparent:true});
+    const mTie=new THREE.MeshStandardMaterial({color:0x8a8070,roughness:.84,metalness:.04});
+    const mPanel=new THREE.MeshStandardMaterial({color:0xd8ccb8,roughness:.9,metalness:0,transparent:true,opacity:.18,side:THREE.DoubleSide});
 
     const pts=[];
     for(const w of walls){
@@ -1643,8 +1645,7 @@ function applyPillarView(show,walls){
       });
     }
 
-    const lineMat=new THREE.LineBasicMaterial({color:0xb8aa98,opacity:.42,transparent:true});
-    const lineMat2=new THREE.LineBasicMaterial({color:0x8a8070,opacity:.28,transparent:true});
+    const tieKeys=new Set();
     for(const w of walls){
       const onWall=unique.filter(p=>{
         if(w.t==='H'){
@@ -1657,12 +1658,37 @@ function applyPillarView(show,walls){
       if(onWall.length>=2){
         for(let k=0;k<onWall.length-1;k++){
           const a=onWall[k],b=onWall[k+1];
-          const gTop=new THREE.BufferGeometry().setFromPoints([
-            new THREE.Vector3(a.x,WALL_H,a.z),new THREE.Vector3(b.x,WALL_H,b.z)]);
-          pillarGroup.add(new THREE.Line(gTop,lineMat));
-          const gBot=new THREE.BufferGeometry().setFromPoints([
-            new THREE.Vector3(a.x,.04,a.z),new THREE.Vector3(b.x,.04,b.z)]);
-          pillarGroup.add(new THREE.Line(gBot,lineMat2));
+          const len=Math.hypot(b.x-a.x,b.z-a.z);
+          if(len<.35)continue;
+          const cx=(a.x+b.x)/2,cz=(a.z+b.z)/2;
+          const key=`${Math.round(cx*20)}:${Math.round(cz*20)}:${Math.round(len*20)}`;
+          if(tieKeys.has(key))continue;
+          tieKeys.add(key);
+          const angle=Math.atan2(b.z-a.z,b.x-a.x);
+          const tieLen=len+PILLAR_S*.72;
+
+          const topBeam=new THREE.Mesh(new THREE.BoxGeometry(tieLen,.18,.20),mTie);
+          topBeam.position.set(cx,WALL_H-.12,cz);
+          topBeam.rotation.y=-angle;
+          topBeam.castShadow=true;topBeam.receiveShadow=true;
+          pillarGroup.add(topBeam);
+
+          const baseBeam=new THREE.Mesh(new THREE.BoxGeometry(tieLen,.16,.18),mTie);
+          baseBeam.position.set(cx,.30,cz);
+          baseBeam.rotation.y=-angle;
+          baseBeam.castShadow=true;baseBeam.receiveShadow=true;
+          pillarGroup.add(baseBeam);
+
+          const panel=new THREE.Mesh(new THREE.BoxGeometry(tieLen,.95,.06),mPanel);
+          panel.position.set(cx,.92,cz);
+          panel.rotation.y=-angle;
+          panel.receiveShadow=true;
+          pillarGroup.add(panel);
+
+          const topEdge=new THREE.LineSegments(new THREE.EdgesGeometry(topBeam.geometry),mEdge);
+          topEdge.position.copy(topBeam.position);
+          topEdge.rotation.copy(topBeam.rotation);
+          pillarGroup.add(topEdge);
         }
       }
     }
