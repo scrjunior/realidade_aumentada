@@ -572,50 +572,55 @@ async function runPipeline(imgData){
   cv.threshold(blurred,bin,0,255,cv.THRESH_BINARY_INV+cv.THRESH_OTSU);
   blurred.delete();
 
-  const kNoise=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(3,3));
+  const kNoise=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(2,2));
   let binClean=new cv.Mat();
   cv.morphologyEx(bin,binClean,cv.MORPH_OPEN,kNoise);
   kNoise.delete();bin.delete();
 
   setProgress(4);await sleep(25);
-  const structMinPx=Math.round(minDim*0.06);
+  const structMinPx=Math.round(minDim*0.055);
   const kh=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(structMinPx,1));
   const kv=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(1,structMinPx));
   let horiz=new cv.Mat(),vert=new cv.Mat();
   cv.morphologyEx(binClean,horiz,cv.MORPH_OPEN,kh);
   cv.morphologyEx(binClean,vert,cv.MORPH_OPEN,kv);
   kh.delete();kv.delete();
-  let walls=new cv.Mat();
-  cv.bitwise_or(horiz,vert,walls);
-  horiz.delete();vert.delete();binClean.delete();
 
-  setProgress(5,'Fechar paredes duplas...');await sleep(20);
-  const gapClose=Math.round(minDim*0.026);
+  const doorClosePx=Math.max(7,Math.round(minDim*0.045));
+  const khClose=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(doorClosePx,3));
+  const kvClose=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(3,doorClosePx));
+  let horizClosed=new cv.Mat(),vertClosed=new cv.Mat();
+  cv.morphologyEx(horiz,horizClosed,cv.MORPH_CLOSE,khClose);
+  cv.morphologyEx(vert,vertClosed,cv.MORPH_CLOSE,kvClose);
+  khClose.delete();kvClose.delete();horiz.delete();vert.delete();
+
+  let walls=new cv.Mat();
+  cv.bitwise_or(horizClosed,vertClosed,walls);
+  horizClosed.delete();vertClosed.delete();binClean.delete();
+
+  setProgress(5,'Fechar portas e janelas pequenas...');await sleep(20);
+  const gapClose=Math.round(minDim*0.032);
   const kd=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(gapClose,gapClose));
   let wallsClosed=new cv.Mat();
-  cv.dilate(walls,wallsClosed,kd);
+  cv.morphologyEx(walls,wallsClosed,cv.MORPH_CLOSE,kd);
   kd.delete();
-  const erodeAmt=Math.max(1,Math.round(gapClose*0.4));
-  const ke=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(erodeAmt,erodeAmt));
-  let wallsFinal=new cv.Mat();
-  cv.erode(wallsClosed,wallsFinal,ke);
-  ke.delete();walls.delete();wallsClosed.delete();
+  walls.delete();
 
-  const skel=await skeletonize(wallsFinal);
-  wallsFinal.delete();
+  const skel=await skeletonize(wallsClosed);
+  wallsClosed.delete();
 
   setProgress(6);await sleep(20);
   let lines=new cv.Mat();
-  const minLen=Math.round(minDim*0.03);
-  const maxGap=Math.round(minDim*0.018);
-  cv.HoughLinesP(skel,lines,1,Math.PI/180,15,minLen,maxGap);
+  const minLen=Math.round(minDim*0.025);
+  const maxGap=Math.round(minDim*0.045);
+  cv.HoughLinesP(skel,lines,1,Math.PI/180,12,minLen,maxGap);
   skel.delete();
   const rawCount=lines.rows;
 
   setProgress(7);await sleep(20);
   const snapped=[];
-  const snapTol=12;
-  const filterLen=minDim*0.05;
+  const snapTol=10;
+  const filterLen=minDim*0.038;
   for(let i=0;i<lines.rows;i++){
     const[x1,y1,x2,y2]=[lines.data32S[i*4],lines.data32S[i*4+1],
                          lines.data32S[i*4+2],lines.data32S[i*4+3]];
@@ -633,9 +638,9 @@ async function runPipeline(imgData){
   lines.delete();
 
   setProgress(8,'Merge + filtro anti-mobília...');await sleep(20);
-  const merged=mergeColinear(snapped,minDim*0.018,minDim*0.04);
-  const structural=merged.filter(l=>l.len>minDim*0.065);
-  const filtered=filterIsolatedSegments(structural,minDim*0.2);
+  const network=completeWallNetwork(snapped,minDim);
+  const structural=network.filter(l=>l.len>minDim*0.065);
+  const filtered=filterIsolatedSegments(structural,minDim*0.18);
 
   if(filtered.length<2){
     throw new Error(
@@ -680,6 +685,96 @@ function filterIsolatedSegments(segs,proximity){
     }
     return false;
   });
+}
+
+function completeWallNetwork(segs,minDim){
+  if(!segs.length)return [];
+  const axisTol=Math.max(6,Math.round(minDim*0.016));
+  const mergeGap=Math.max(14,Math.round(minDim*0.075));
+  const junctionGap=Math.max(18,Math.round(minDim*0.11));
+
+  const snapped=snapWallAxes(segs,axisTol);
+  let out=mergeColinear(snapped,axisTol,mergeGap)
+    .filter(s=>s.len>minDim*0.045);
+
+  for(let pass=0;pass<2;pass++){
+    out=extendToJunctions(out,axisTol,junctionGap);
+    out=mergeColinear(out,axisTol,mergeGap);
+  }
+
+  return removeDuplicateSegments(out,axisTol);
+}
+
+function snapWallAxes(segs,axisTol){
+  const out=segs.map(s=>({...s}));
+  for(const type of ['H','V']){
+    const groups=[];
+    for(const s of out.filter(x=>x.t===type)){
+      const axis=type==='H'?s.y1:s.x1;
+      let best=null,bestDist=Infinity;
+      for(const g of groups){
+        const d=Math.abs(g.avg-axis);
+        if(d<axisTol&&d<bestDist){best=g;bestDist=d;}
+      }
+      if(!best){best={avg:axis,segs:[]};groups.push(best);}
+      best.segs.push(s);
+      best.avg=best.segs.reduce((sum,v)=>sum+(type==='H'?v.y1:v.x1),0)/best.segs.length;
+    }
+    for(const g of groups){
+      const axis=Math.round(g.avg);
+      for(const s of g.segs){
+        if(type==='H'){s.y1=axis;s.y2=axis;}
+        else{s.x1=axis;s.x2=axis;}
+      }
+    }
+  }
+  return out;
+}
+
+function extendToJunctions(segs,axisTol,junctionGap){
+  const out=segs.map(s=>({...s}));
+  const hs=out.filter(s=>s.t==='H');
+  const vs=out.filter(s=>s.t==='V');
+
+  for(const h of hs){
+    for(const v of vs){
+      const vLo=Math.min(v.y1,v.y2),vHi=Math.max(v.y1,v.y2);
+      if(h.y1<vLo-axisTol||h.y1>vHi+axisTol)continue;
+      if(v.x1<h.x1&&h.x1-v.x1<=junctionGap)h.x1=v.x1;
+      if(v.x1>h.x2&&v.x1-h.x2<=junctionGap)h.x2=v.x1;
+    }
+    h.len=Math.abs(h.x2-h.x1);
+  }
+
+  for(const v of vs){
+    for(const h of hs){
+      const hLo=Math.min(h.x1,h.x2),hHi=Math.max(h.x1,h.x2);
+      if(v.x1<hLo-axisTol||v.x1>hHi+axisTol)continue;
+      if(h.y1<v.y1&&v.y1-h.y1<=junctionGap)v.y1=h.y1;
+      if(h.y1>v.y2&&h.y1-v.y2<=junctionGap)v.y2=h.y1;
+    }
+    v.len=Math.abs(v.y2-v.y1);
+  }
+
+  return out;
+}
+
+function removeDuplicateSegments(segs,axisTol){
+  const sorted=[...segs].sort((a,b)=>b.len-a.len);
+  const keep=[];
+  for(const s of sorted){
+    const dup=keep.some(k=>{
+      if(k.t!==s.t)return false;
+      if(s.t==='H'){
+        return Math.abs(k.y1-s.y1)<axisTol&&
+          Math.abs(k.x1-s.x1)<axisTol*1.5&&Math.abs(k.x2-s.x2)<axisTol*1.5;
+      }
+      return Math.abs(k.x1-s.x1)<axisTol&&
+        Math.abs(k.y1-s.y1)<axisTol*1.5&&Math.abs(k.y2-s.y2)<axisTol*1.5;
+    });
+    if(!dup)keep.push(s);
+  }
+  return keep;
 }
 
 async function skeletonize(mat){
