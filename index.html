@@ -1646,51 +1646,67 @@ function applyPillarView(show,walls){
     }
 
     const tieKeys=new Set();
-    for(const w of walls){
-      const onWall=unique.filter(p=>{
-        if(w.t==='H'){
-          return p.x>=Math.min(w.x1n,w.x2n)-.15&&p.x<=Math.max(w.x1n,w.x2n)+.15&&Math.abs(p.z-w.z1n)<0.3;
-        }else{
-          return p.z>=Math.min(w.z1n,w.z2n)-.15&&p.z<=Math.max(w.z1n,w.z2n)+.15&&Math.abs(p.x-w.x1n)<0.3;
+
+    function addTie(a,b){
+      const len=Math.hypot(b.x-a.x,b.z-a.z);
+      if(len<.35)return;
+      const cx=(a.x+b.x)/2,cz=(a.z+b.z)/2;
+      const key=`${Math.round(Math.min(a.x,b.x)*20)}:${Math.round(Math.min(a.z,b.z)*20)}:${Math.round(Math.max(a.x,b.x)*20)}:${Math.round(Math.max(a.z,b.z)*20)}`;
+      if(tieKeys.has(key))return;
+      tieKeys.add(key);
+      const angle=Math.atan2(b.z-a.z,b.x-a.x);
+      const tieLen=len+PILLAR_S*.72;
+
+      const topBeam=new THREE.Mesh(new THREE.BoxGeometry(tieLen,.18,.20),mTie);
+      topBeam.position.set(cx,WALL_H-.12,cz);
+      topBeam.rotation.y=-angle;
+      topBeam.castShadow=true;topBeam.receiveShadow=true;
+      pillarGroup.add(topBeam);
+
+      const baseBeam=new THREE.Mesh(new THREE.BoxGeometry(tieLen,.16,.18),mTie);
+      baseBeam.position.set(cx,.30,cz);
+      baseBeam.rotation.y=-angle;
+      baseBeam.castShadow=true;baseBeam.receiveShadow=true;
+      pillarGroup.add(baseBeam);
+
+      const panel=new THREE.Mesh(new THREE.BoxGeometry(tieLen,.95,.06),mPanel);
+      panel.position.set(cx,.92,cz);
+      panel.rotation.y=-angle;
+      panel.receiveShadow=true;
+      pillarGroup.add(panel);
+
+      const topEdge=new THREE.LineSegments(new THREE.EdgesGeometry(topBeam.geometry),mEdge);
+      topEdge.position.copy(topBeam.position);
+      topEdge.rotation.copy(topBeam.rotation);
+      pillarGroup.add(topEdge);
+    }
+
+    function clusterPillars(points,axis){
+      const tol=.34;
+      const groups=[];
+      for(const p of points){
+        const v=axis==='z'?p.z:p.x;
+        let best=null,bestDist=Infinity;
+        for(const g of groups){
+          const d=Math.abs(g.avg-v);
+          if(d<tol&&d<bestDist){best=g;bestDist=d;}
         }
-      });
-      onWall.sort((a,b)=>w.t==='H'?a.x-b.x:a.z-b.z);
-      if(onWall.length>=2){
-        for(let k=0;k<onWall.length-1;k++){
-          const a=onWall[k],b=onWall[k+1];
-          const len=Math.hypot(b.x-a.x,b.z-a.z);
-          if(len<.35)continue;
-          const cx=(a.x+b.x)/2,cz=(a.z+b.z)/2;
-          const key=`${Math.round(cx*20)}:${Math.round(cz*20)}:${Math.round(len*20)}`;
-          if(tieKeys.has(key))continue;
-          tieKeys.add(key);
-          const angle=Math.atan2(b.z-a.z,b.x-a.x);
-          const tieLen=len+PILLAR_S*.72;
-
-          const topBeam=new THREE.Mesh(new THREE.BoxGeometry(tieLen,.18,.20),mTie);
-          topBeam.position.set(cx,WALL_H-.12,cz);
-          topBeam.rotation.y=-angle;
-          topBeam.castShadow=true;topBeam.receiveShadow=true;
-          pillarGroup.add(topBeam);
-
-          const baseBeam=new THREE.Mesh(new THREE.BoxGeometry(tieLen,.16,.18),mTie);
-          baseBeam.position.set(cx,.30,cz);
-          baseBeam.rotation.y=-angle;
-          baseBeam.castShadow=true;baseBeam.receiveShadow=true;
-          pillarGroup.add(baseBeam);
-
-          const panel=new THREE.Mesh(new THREE.BoxGeometry(tieLen,.95,.06),mPanel);
-          panel.position.set(cx,.92,cz);
-          panel.rotation.y=-angle;
-          panel.receiveShadow=true;
-          pillarGroup.add(panel);
-
-          const topEdge=new THREE.LineSegments(new THREE.EdgesGeometry(topBeam.geometry),mEdge);
-          topEdge.position.copy(topBeam.position);
-          topEdge.rotation.copy(topBeam.rotation);
-          pillarGroup.add(topEdge);
-        }
+        if(!best){best={avg:v,pts:[]};groups.push(best);}
+        best.pts.push(p);
+        best.avg=best.pts.reduce((s,q)=>s+(axis==='z'?q.z:q.x),0)/best.pts.length;
       }
+      return groups.filter(g=>g.pts.length>1);
+    }
+
+    const rows=clusterPillars(unique,'z');
+    const cols=clusterPillars(unique,'x');
+    for(const row of rows){
+      row.pts.sort((a,b)=>a.x-b.x);
+      for(let i=0;i<row.pts.length-1;i++)addTie(row.pts[i],row.pts[i+1]);
+    }
+    for(const col of cols){
+      col.pts.sort((a,b)=>a.z-b.z);
+      for(let i=0;i<col.pts.length-1;i++)addTie(col.pts[i],col.pts[i+1]);
     }
     scn.add(pillarGroup);
   }else{
