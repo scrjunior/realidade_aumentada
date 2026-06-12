@@ -46,6 +46,22 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
 .btn-r{background:var(--red);color:white}.btn-r:hover{background:#a82d22}
 .btn-o{background:transparent;border:1px solid var(--border);color:var(--paper)}.btn-o:hover{background:var(--surface)}
 .note-txt{font-size:11px;color:var(--muted);text-align:center;max-width:290px;line-height:1.6}
+.saved-panel{width:100%;max-width:360px;margin:0 0 1.3rem;display:none;flex-direction:column;gap:8px}
+.saved-panel.on{display:flex}
+.saved-head{display:flex;align-items:center;justify-content:space-between}
+.saved-title{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--red);text-transform:uppercase}
+.saved-count{font-family:var(--mono);font-size:10px;color:var(--muted)}
+.saved-list{display:flex;flex-direction:column;gap:7px}
+.saved-item{display:grid;grid-template-columns:58px 1fr auto;gap:9px;align-items:center;
+  background:var(--surface);border:1px solid var(--border);border-radius:2px;padding:7px}
+.saved-thumb{width:58px;height:44px;object-fit:cover;background:#fff;border-radius:1px}
+.saved-meta{min-width:0;display:flex;flex-direction:column;gap:2px}
+.saved-name{font-size:12px;color:var(--paper);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.saved-sub{font-family:var(--mono);font-size:9px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.saved-actions{display:flex;gap:4px}
+.saved-act{width:30px;height:30px;border-radius:2px;border:1px solid var(--border);
+  background:rgba(242,237,228,.04);color:var(--paper);font-size:12px;cursor:pointer}
+.saved-act:hover{border-color:rgba(200,57,43,.35);color:var(--red)}
 
 /* ── CÂMERA ── */
 #cam-view{display:none;position:fixed;inset:0}
@@ -232,6 +248,13 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
     <button class="btn btn-r" onclick="startCam()">📷 Abrir Câmera</button>
     <button class="btn btn-o" onclick="showTips()">💡 Dicas para melhor resultado</button>
   </div>
+  <div class="saved-panel" id="saved-panel">
+    <div class="saved-head">
+      <div class="saved-title">Projetos guardados</div>
+      <div class="saved-count" id="saved-count">0</div>
+    </div>
+    <div class="saved-list" id="saved-list"></div>
+  </div>
   
 </div>
 
@@ -309,6 +332,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);
       <button class="v3-btn" id="vb-wf" onclick="toggleWF()"><span class="ic">▥</span>Pilares</button>
       <button class="v3-btn" id="vb-found" onclick="toggleFoundation()"><span class="ic">🪨</span>Fundação</button>
       <button class="v3-btn" id="vb-roof" onclick="toggleRoof()"><span class="ic">⌂</span>Cobertura</button>
+      <button class="v3-btn" id="vb-save" onclick="saveCurrentProject()"><span class="ic">💾</span>Guardar</button>
       <button class="v3-btn" id="vb-new" onclick="goBackCam()"><span class="ic">📷</span>Nova</button>
     </div>
     <div class="roof-options" id="roof-options">
@@ -411,7 +435,7 @@ if (document.readyState === 'loading') {
 // ═══════════════════════════════════════════════════════
 //  ESTADO
 // ═══════════════════════════════════════════════════════
-let cvReady=false, stream=null, captured=null;
+let cvReady=false, stream=null, captured=null, capturedThumb=null, currentProjectData=null, loadedProjectId=null;
 let ren=null, scn=null, cam=null, hg=null, animId=null, isWF=false, isFoundation=false, isRoof=false, roofType='duas', curView='3d';
 let orb={rotX:-.32,rotY:.4,scale:1,down:false,last:{x:0,y:0},pinchDist:0};
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
@@ -425,17 +449,124 @@ function hideTips(){off('tips-view');}
 function showErr(msg,det){el('err-msg').textContent=msg;el('err-det').textContent=det||'';on('err-view');}
 function closeErr(){off('err-view');}
 
+// ═══════════════════════════════════════════════════════
+//  PROJETOS GUARDADOS (por utilizador, neste dispositivo)
+// ═══════════════════════════════════════════════════════
+function projectsKey(){
+  const s=Auth.getSession();
+  return s ? `plantas_ar_projects_${s.userId}` : 'plantas_ar_projects_guest';
+}
+
+function getSavedProjects(){
+  try{return JSON.parse(localStorage.getItem(projectsKey()))||[];}
+  catch{return [];}
+}
+
+function setSavedProjects(items){
+  localStorage.setItem(projectsKey(),JSON.stringify(items));
+}
+
+function esc(s){
+  return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function makePlanThumb(canvas){
+  const maxW=520;
+  const scale=Math.min(1,maxW/canvas.width);
+  const out=document.createElement('canvas');
+  out.width=Math.max(1,Math.round(canvas.width*scale));
+  out.height=Math.max(1,Math.round(canvas.height*scale));
+  const ctx=out.getContext('2d');
+  ctx.fillStyle='#fff';
+  ctx.fillRect(0,0,out.width,out.height);
+  ctx.drawImage(canvas,0,0,out.width,out.height);
+  return out.toDataURL('image/jpeg',0.72);
+}
+
+function formatProjectDate(iso){
+  try{return new Date(iso).toLocaleString('pt-PT',{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});}
+  catch{return '';}
+}
+
+function renderSavedProjects(){
+  const panel=el('saved-panel'),list=el('saved-list'),count=el('saved-count');
+  if(!panel||!list||!count)return;
+  const items=getSavedProjects();
+  panel.classList.toggle('on',items.length>0);
+  count.textContent=items.length+' projeto'+(items.length===1?'':'s');
+  list.innerHTML=items.map(p=>`
+    <div class="saved-item">
+      <img class="saved-thumb" src="${p.image||''}" alt="Planta guardada">
+      <div class="saved-meta">
+        <div class="saved-name">${esc(p.name)}</div>
+        <div class="saved-sub">${esc(formatProjectDate(p.createdAt))} · ${p.model?.wallCount||0} paredes</div>
+      </div>
+      <div class="saved-actions">
+        <button class="saved-act" onclick="openSavedProject('${esc(p.id)}')" title="Abrir">↗</button>
+        <button class="saved-act" onclick="deleteSavedProject('${esc(p.id)}')" title="Apagar">×</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function saveCurrentProject(){
+  if(!currentProjectData){showErr('Nada para guardar','Analisa uma planta primeiro.');return;}
+  const projects=getSavedProjects();
+  const now=new Date().toISOString();
+  const fallbackName='Planta '+new Date().toLocaleDateString('pt-PT',{day:'2-digit',month:'2-digit',year:'2-digit'});
+  const name=prompt('Nome do projeto:',currentProjectData.name||fallbackName);
+  if(name===null)return;
+  const item={
+    id:loadedProjectId||crypto.randomUUID(),
+    name:(name.trim()||fallbackName),
+    createdAt:loadedProjectId?(projects.find(p=>p.id===loadedProjectId)?.createdAt||now):now,
+    updatedAt:now,
+    image:capturedThumb||currentProjectData.image||'',
+    model:currentProjectData.model||currentProjectData
+  };
+  const next=[item,...projects.filter(p=>p.id!==item.id)].slice(0,20);
+  try{
+    setSavedProjects(next);
+    loadedProjectId=item.id;
+    currentProjectData={name:item.name,image:item.image,model:item.model};
+    renderSavedProjects();
+    el('v3-info').textContent='Projeto guardado';
+  }catch(e){
+    showErr('Não foi possível guardar','O armazenamento local pode estar cheio. Apaga projetos antigos e tenta novamente.');
+  }
+}
+
+function openSavedProject(id){
+  const p=getSavedProjects().find(x=>x.id===id);
+  if(!p||!p.model)return;
+  loadedProjectId=p.id;
+  capturedThumb=p.image||null;
+  el('splash').style.display='none';
+  build3D(p.model);
+  currentProjectData={name:p.name,image:p.image,model:p.model};
+  el('v3-info').textContent='Projeto guardado';
+}
+
+function deleteSavedProject(id){
+  if(!confirm('Apagar este projeto guardado?'))return;
+  setSavedProjects(getSavedProjects().filter(p=>p.id!==id));
+  if(loadedProjectId===id)loadedProjectId=null;
+  renderSavedProjects();
+}
+
 function goBack(){
   stopStream();
   ['cam-view','cam-hud','cap-area','scan-pulse','preview-view','prog-view','view3d','found-legend'].forEach(off);
   off('back-btn');
   if(animId){cancelAnimationFrame(animId);animId=null;}
   el('splash').style.display='flex';
+  renderSavedProjects();
 }
 function goBackCam(){
   off('view3d');off('found-legend');
   if(animId){cancelAnimationFrame(animId);animId=null;}
   isFoundation=false;isWF=false;
+  loadedProjectId=null;currentProjectData=null;capturedThumb=null;
   startCam();
 }
 
@@ -486,12 +617,14 @@ function captureFrame(){
   const ctx=pc.getContext('2d');
   ctx.drawImage(v,0,0);
   captured=ctx.getImageData(0,0,pc.width,pc.height);
+  capturedThumb=makePlanThumb(pc);
+  loadedProjectId=null;
   stopStream();
   off('cam-view');off('cam-hud');off('cap-area');off('scan-pulse');
   on('preview-view');
   el('prev-quality').innerHTML=`Capturado: <strong>${v.videoWidth}×${v.videoHeight}px</strong>. Planta nítida e enquadrada?`;
 }
-function retake(){off('preview-view');captured=null;startCam();}
+function retake(){off('preview-view');captured=null;capturedThumb=null;loadedProjectId=null;startCam();}
 
 // ═══════════════════════════════════════════════════════
 //  PIPELINE DE ANÁLISE
@@ -530,6 +663,8 @@ async function processImage(){
     setProgress(9,'A construir modelo 3D...');
     await sleep(150);
     off('prog-view');
+    currentProjectData={name:null,image:capturedThumb,model:result};
+    loadedProjectId=null;
     build3D(result);
   }catch(e){
     off('prog-view');
@@ -1842,6 +1977,8 @@ function toggleWF(){
 window.addEventListener('resize',()=>{
   if(ren&&cam){ren.setSize(window.innerWidth,window.innerHeight);cam.aspect=window.innerWidth/window.innerHeight;cam.updateProjectionMatrix();}
 });
+
+renderSavedProjects();
 </script>
 </body>
 </html>
