@@ -1253,7 +1253,6 @@ function buildFoundationView(walls){
   const TRENCH_D  = 0.55;   // profundidade da vala abaixo do solo
   const PILLAR_S  = 0.34;   // secção quadrada do pilar/sapata
   const PILLAR_H  = 1.05;   // altura do pilar acima da viga
-  const REBAR_UP  = 0.58;   // quanto o varão emerge acima do topo da viga
   const AXIS_TOL  = 0.45;   // tolerância para agrupar segmentos colineares
 
   // ── Bounds globais
@@ -1400,8 +1399,6 @@ function buildFoundationView(walls){
   const mTrench  = new THREE.MeshStandardMaterial({color:0x1a0e06,roughness:1,metalness:0,side:THREE.BackSide});
   const mPillar  = new THREE.MeshStandardMaterial({color:0x696058,roughness:.82,metalness:.06});
   const mPillarT = new THREE.MeshStandardMaterial({color:0x555048,roughness:.78,metalness:.09});
-  const mRebar   = new THREE.MeshStandardMaterial({color:0xcc5500,roughness:.38,metalness:.88});
-  const mStirrup = new THREE.LineBasicMaterial({color:0xee7711,opacity:.95,transparent:true});
   const mRebarV  = new THREE.MeshStandardMaterial({color:0xdd5500,roughness:.35,metalness:.9});
 
   // ══════════════════════════════════════════════════════
@@ -1461,49 +1458,6 @@ function buildFoundationView(walls){
     beamEdgeMesh.rotation.y = angle;
     foundationGroup.add(beamEdgeMesh);
 
-    // -- Varões longitudinais (emergem acima da viga)
-    const spacingR = 0.55;
-    const numR     = Math.max(3, Math.floor(b.len / spacingR));
-    const sideOff  = BEAM_W * 0.28;
-
-    for(let ri = 0; ri <= numR; ri++){
-      const t   = (ri / numR) - 0.5;
-      const rx  = b.cx + b.dx * b.len * t;
-      const rz  = b.cz + b.dz * b.len * t;
-      const rH  = BEAM_H + REBAR_UP;
-      for(const side of [-1, 1]){
-        const ox = b.nx * sideOff * side;
-        const oz = b.nz * sideOff * side;
-        const rMesh = new THREE.Mesh(
-          new THREE.CylinderGeometry(0.016, 0.016, rH, 6),
-          mRebar);
-        rMesh.position.set(rx + ox, rH/2 - REBAR_UP * 0.06, rz + oz);
-        rMesh.castShadow = true;
-        foundationGroup.add(rMesh);
-      }
-    }
-
-    // -- Estribos
-    const spacingSt = 0.48;
-    const numSt     = Math.max(2, Math.floor(b.len / spacingSt));
-    const sw = BEAM_W * 0.50;
-    const sh = BEAM_H * 0.72;
-    const sy0 = BEAM_H * 0.14;
-
-    for(let si = 0; si <= numSt; si++){
-      const t  = (si / numSt) - 0.5;
-      const sx = b.cx + b.dx * b.len * t;
-      const sz = b.cz + b.dz * b.len * t;
-      const pts = [
-        new THREE.Vector3(sx + b.nx*sw/2, sy0,      sz + b.nz*sw/2),
-        new THREE.Vector3(sx - b.nx*sw/2, sy0,      sz - b.nz*sw/2),
-        new THREE.Vector3(sx - b.nx*sw/2, sy0 + sh, sz - b.nz*sw/2),
-        new THREE.Vector3(sx + b.nx*sw/2, sy0 + sh, sz + b.nz*sw/2),
-        new THREE.Vector3(sx + b.nx*sw/2, sy0,      sz + b.nz*sw/2),
-      ];
-      foundationGroup.add(new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints(pts), mStirrup));
-    }
   }
 
   // ══════════════════════════════════════════════════════
