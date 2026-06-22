@@ -612,8 +612,9 @@ function waitCV(){return new Promise(r=>{if(cvReady){r();return;}const t=setInte
 function captureFrame(){
   const v=el('video');
   if(!v.videoWidth)return;
+  const vw=v.videoWidth,vh=v.videoHeight;
   const pc=el('preview-canvas');
-  pc.width=v.videoWidth;pc.height=v.videoHeight;
+  pc.width=vw;pc.height=vh;
   const ctx=pc.getContext('2d');
   ctx.drawImage(v,0,0);
   captured=ctx.getImageData(0,0,pc.width,pc.height);
@@ -622,7 +623,7 @@ function captureFrame(){
   stopStream();
   off('cam-view');off('cam-hud');off('cap-area');off('scan-pulse');
   on('preview-view');
-  el('prev-quality').innerHTML=`Capturado: <strong>${v.videoWidth}×${v.videoHeight}px</strong>. Planta nítida e enquadrada?`;
+  el('prev-quality').innerHTML=`Capturado: <strong>${vw}×${vh}px</strong>. Planta nítida e enquadrada?`;
 }
 function retake(){off('preview-view');captured=null;capturedThumb=null;loadedProjectId=null;startCam();}
 
@@ -635,7 +636,7 @@ const STEPS=[
   'Remover ruído (Gaussian blur)',
   'Binarização adaptativa (Otsu)',
   'Isolar linhas estruturais H+V',
-  'Fechar paredes duplas + esqueleto',
+  'Limpar contorno + preservar aberturas',
   'HoughLinesP sobre o esqueleto',
   'Snap H/V + filtro de comprimento',
   'Merge colinear + filtro anti-mobília',
@@ -681,8 +682,8 @@ async function runPipeline(imgData){
 
   const maxSide=1200;
   const sc=Math.min(1,maxSide/Math.max(IW,IH));
-  const PW=Math.round(IW*sc), PH=Math.round(IH*sc);
-  const minDim=Math.min(PW,PH);
+  let PW=Math.round(IW*sc), PH=Math.round(IH*sc);
+  let minDim=Math.min(PW,PH);
 
   setProgress(0);await sleep(25);
   let src=cv.imread(cvC);
@@ -690,6 +691,13 @@ async function runPipeline(imgData){
   cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);
   src.delete();
   if(sc<1){let r=new cv.Mat();cv.resize(gray,r,new cv.Size(PW,PH));gray.delete();gray=r;}
+
+  const roi=cropToPlanArea(gray);
+  if(roi){
+    gray.delete();
+    gray=roi;
+    PW=gray.cols;PH=gray.rows;minDim=Math.min(PW,PH);
+  }
 
   setProgress(1,'Melhorar contraste (CLAHE)...');await sleep(25);
   let enhanced=new cv.Mat();
@@ -721,7 +729,7 @@ async function runPipeline(imgData){
   cv.morphologyEx(binClean,vert,cv.MORPH_OPEN,kv);
   kh.delete();kv.delete();
 
-  const doorClosePx=Math.max(7,Math.round(minDim*0.045));
+  const doorClosePx=Math.max(5,Math.round(minDim*0.018));
   const khClose=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(doorClosePx,3));
   const kvClose=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(3,doorClosePx));
   let horizClosed=new cv.Mat(),vertClosed=new cv.Mat();
@@ -733,8 +741,8 @@ async function runPipeline(imgData){
   cv.bitwise_or(horizClosed,vertClosed,walls);
   horizClosed.delete();vertClosed.delete();binClean.delete();
 
-  setProgress(5,'Fechar portas e janelas pequenas...');await sleep(20);
-  const gapClose=Math.round(minDim*0.032);
+  setProgress(5,'Limpar paredes e preservar aberturas...');await sleep(20);
+  const gapClose=Math.max(3,Math.round(minDim*0.012));
   const kd=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(gapClose,gapClose));
   let wallsClosed=new cv.Mat();
   cv.morphologyEx(walls,wallsClosed,cv.MORPH_CLOSE,kd);
@@ -747,7 +755,7 @@ async function runPipeline(imgData){
   setProgress(6);await sleep(20);
   let lines=new cv.Mat();
   const minLen=Math.round(minDim*0.025);
-  const maxGap=Math.round(minDim*0.045);
+  const maxGap=Math.round(minDim*0.022);
   cv.HoughLinesP(skel,lines,1,Math.PI/180,12,minLen,maxGap);
   skel.delete();
   const rawCount=lines.rows;
@@ -822,11 +830,53 @@ function filterIsolatedSegments(segs,proximity){
   });
 }
 
+function cropToPlanArea(gray){
+  let blur=new cv.Mat(),paper=new cv.Mat(),closed=new cv.Mat();
+  let contours=new cv.MatVector(),hierarchy=new cv.Mat();
+  try{
+    cv.GaussianBlur(gray,blur,new cv.Size(9,9),0);
+    cv.threshold(blur,paper,0,255,cv.THRESH_BINARY+cv.THRESH_OTSU);
+    const k=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(19,19));
+    cv.morphologyEx(paper,closed,cv.MORPH_CLOSE,k);
+    k.delete();
+    cv.findContours(closed,contours,hierarchy,cv.RETR_EXTERNAL,cv.CHAIN_APPROX_SIMPLE);
+
+    const imgArea=gray.cols*gray.rows;
+    let best=null,bestArea=0;
+    for(let i=0;i<contours.size();i++){
+      const cnt=contours.get(i);
+      const r=cv.boundingRect(cnt);
+      cnt.delete();
+      const area=r.width*r.height;
+      const fillsEnough=area>imgArea*0.18;
+      const notWholeImage=area<imgArea*0.96;
+      const hasPlanShape=r.width>gray.cols*0.28&&r.height>gray.rows*0.28;
+      if(fillsEnough&&notWholeImage&&hasPlanShape&&area>bestArea){
+        best=r;bestArea=area;
+      }
+    }
+    if(!best)return null;
+
+    const margin=Math.round(Math.min(best.width,best.height)*0.045);
+    const x=Math.max(0,best.x-margin);
+    const y=Math.max(0,best.y-margin);
+    const w=Math.min(gray.cols-x,best.width+margin*2);
+    const h=Math.min(gray.rows-y,best.height+margin*2);
+    if(w<gray.cols*0.25||h<gray.rows*0.25)return null;
+    return gray.roi(new cv.Rect(x,y,w,h)).clone();
+  }catch(e){
+    console.warn('cropToPlanArea falhou',e);
+    return null;
+  }finally{
+    blur.delete();paper.delete();closed.delete();contours.delete();hierarchy.delete();
+  }
+}
+
 function completeWallNetwork(segs,minDim){
   if(!segs.length)return [];
   const axisTol=Math.max(6,Math.round(minDim*0.016));
-  const mergeGap=Math.max(14,Math.round(minDim*0.075));
-  const junctionGap=Math.max(18,Math.round(minDim*0.11));
+  const mergeGap=Math.max(8,Math.round(minDim*0.028));
+  const junctionGap=Math.max(12,Math.round(minDim*0.055));
 
   const snapped=snapWallAxes(segs,axisTol);
   let out=mergeColinear(snapped,axisTol,mergeGap)
