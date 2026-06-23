@@ -714,12 +714,16 @@ async function runPipeline(imgData){
   setProgress(2,'Remover ruído...');await sleep(20);
   let blurred=new cv.Mat();
   cv.GaussianBlur(enhanced,blurred,new cv.Size(5,5),0.8);
-  enhanced.delete();
 
   setProgress(3);await sleep(20);
-  let bin=new cv.Mat();
-  cv.threshold(blurred,bin,0,255,cv.THRESH_BINARY_INV+cv.THRESH_OTSU);
-  blurred.delete();
+  let binOtsu=new cv.Mat(),binDark=new cv.Mat(),binAdaptive=new cv.Mat(),binMix=new cv.Mat(),bin=new cv.Mat();
+  cv.threshold(blurred,binOtsu,0,255,cv.THRESH_BINARY_INV+cv.THRESH_OTSU);
+  cv.threshold(enhanced,binDark,185,255,cv.THRESH_BINARY_INV);
+  const adaptBlock=Math.max(15,(Math.round(minDim*0.035)|1));
+  cv.adaptiveThreshold(enhanced,binAdaptive,255,cv.ADAPTIVE_THRESH_GAUSSIAN_C,cv.THRESH_BINARY_INV,adaptBlock,9);
+  cv.bitwise_or(binOtsu,binDark,binMix);
+  cv.bitwise_or(binMix,binAdaptive,bin);
+  binOtsu.delete();binDark.delete();binAdaptive.delete();binMix.delete();blurred.delete();enhanced.delete();
 
   const kNoise=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(2,2));
   let binClean=new cv.Mat();
