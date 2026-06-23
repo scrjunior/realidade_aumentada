@@ -698,6 +698,12 @@ async function runPipeline(imgData){
     gray=roi;
     PW=gray.cols;PH=gray.rows;minDim=Math.min(PW,PH);
   }
+  const inkRoi=cropToInkArea(gray);
+  if(inkRoi){
+    gray.delete();
+    gray=inkRoi;
+    PW=gray.cols;PH=gray.rows;minDim=Math.min(PW,PH);
+  }
 
   setProgress(1,'Melhorar contraste (CLAHE)...');await sleep(25);
   let enhanced=new cv.Mat();
@@ -781,9 +787,11 @@ async function runPipeline(imgData){
   lines.delete();
 
   setProgress(8,'Merge + filtro anti-mobília...');await sleep(20);
-  const network=completeWallNetwork(snapped,minDim);
+  const inside=removeBorderArtifacts(snapped,PW,PH,minDim);
+  const network=completeWallNetwork(inside,minDim);
   const structural=network.filter(l=>l.len>minDim*0.065);
-  const filtered=filterIsolatedSegments(structural,minDim*0.18);
+  const localClean=filterIsolatedSegments(structural,minDim*0.18);
+  const filtered=keepMainWallCluster(localClean,minDim);
 
   if(filtered.length<2){
     throw new Error(
@@ -830,6 +838,67 @@ function filterIsolatedSegments(segs,proximity){
   });
 }
 
+function removeBorderArtifacts(segs,w,h,minDim){
+  if(!segs.length)return segs;
+  const margin=Math.max(10,Math.round(minDim*0.035));
+  const longEdge=Math.max(minDim*0.22,60);
+  return segs.filter(s=>{
+    if(s.t==='H'){
+      const nearTop=s.y1<=margin,nearBottom=s.y1>=h-margin;
+      const long=s.len>=longEdge;
+      return !(long&&(nearTop||nearBottom));
+    }
+    const nearLeft=s.x1<=margin,nearRight=s.x1>=w-margin;
+    const long=s.len>=longEdge;
+    return !(long&&(nearLeft||nearRight));
+  });
+}
+
+function keepMainWallCluster(segs,minDim){
+  if(segs.length<=4)return segs;
+  const tol=Math.max(10,Math.round(minDim*0.035));
+  const n=segs.length;
+  const parent=Array.from({length:n},(_,i)=>i);
+  const find=i=>parent[i]===i?i:(parent[i]=find(parent[i]));
+  const unite=(a,b)=>{const ra=find(a),rb=find(b);if(ra!==rb)parent[rb]=ra;};
+
+  function connected(a,b){
+    if(a.t!==b.t){
+      const h=a.t==='H'?a:b;
+      const v=a.t==='V'?a:b;
+      const onH=v.x1>=Math.min(h.x1,h.x2)-tol&&v.x1<=Math.max(h.x1,h.x2)+tol;
+      const onV=h.y1>=Math.min(v.y1,v.y2)-tol&&h.y1<=Math.max(v.y1,v.y2)+tol;
+      return onH&&onV;
+    }
+    if(a.t==='H'){
+      if(Math.abs(a.y1-b.y1)>tol)return false;
+      return Math.max(a.x1,b.x1)<=Math.min(a.x2,b.x2)+tol*1.8;
+    }
+    if(Math.abs(a.x1-b.x1)>tol)return false;
+    return Math.max(a.y1,b.y1)<=Math.min(a.y2,b.y2)+tol*1.8;
+  }
+
+  for(let i=0;i<n;i++){
+    for(let j=i+1;j<n;j++){
+      if(connected(segs[i],segs[j]))unite(i,j);
+    }
+  }
+
+  const groups=new Map();
+  for(let i=0;i<n;i++){
+    const r=find(i);
+    if(!groups.has(r))groups.set(r,{idx:[],len:0});
+    groups.get(r).idx.push(i);
+    groups.get(r).len+=segs[i].len;
+  }
+  const sorted=[...groups.values()].sort((a,b)=>b.len-a.len);
+  const main=sorted[0];
+  if(!main)return segs;
+  const total=segs.reduce((s,x)=>s+x.len,0);
+  if(main.len<total*.42)return segs;
+  return main.idx.map(i=>segs[i]);
+}
+
 function cropToPlanArea(gray){
   let blur=new cv.Mat(),paper=new cv.Mat(),closed=new cv.Mat();
   let contours=new cv.MatVector(),hierarchy=new cv.Mat();
@@ -869,6 +938,45 @@ function cropToPlanArea(gray){
     return null;
   }finally{
     blur.delete();paper.delete();closed.delete();contours.delete();hierarchy.delete();
+  }
+}
+
+function cropToInkArea(gray){
+  let dark=new cv.Mat(),closed=new cv.Mat();
+  let contours=new cv.MatVector(),hierarchy=new cv.Mat();
+  try{
+    cv.threshold(gray,dark,110,255,cv.THRESH_BINARY_INV);
+    const kSize=Math.max(7,Math.round(Math.min(gray.cols,gray.rows)*0.028));
+    const k=cv.getStructuringElement(cv.MORPH_RECT,new cv.Size(kSize,kSize));
+    cv.morphologyEx(dark,closed,cv.MORPH_CLOSE,k);
+    k.delete();
+    cv.findContours(closed,contours,hierarchy,cv.RETR_EXTERNAL,cv.CHAIN_APPROX_SIMPLE);
+
+    const imgArea=gray.cols*gray.rows;
+    let best=null,bestArea=0;
+    for(let i=0;i<contours.size();i++){
+      const cnt=contours.get(i);
+      const r=cv.boundingRect(cnt);
+      cnt.delete();
+      const area=r.width*r.height;
+      if(area>bestArea&&area>imgArea*0.06&&area<imgArea*0.88&&r.width>gray.cols*0.22&&r.height>gray.rows*0.22){
+        best=r;bestArea=area;
+      }
+    }
+    if(!best)return null;
+
+    const margin=Math.round(Math.min(best.width,best.height)*0.075);
+    const x=Math.max(0,best.x-margin);
+    const y=Math.max(0,best.y-margin);
+    const w=Math.min(gray.cols-x,best.width+margin*2);
+    const h=Math.min(gray.rows-y,best.height+margin*2);
+    if(w<gray.cols*0.20||h<gray.rows*0.20)return null;
+    return gray.roi(new cv.Rect(x,y,w,h)).clone();
+  }catch(e){
+    console.warn('cropToInkArea falhou',e);
+    return null;
+  }finally{
+    dark.delete();closed.delete();contours.delete();hierarchy.delete();
   }
 }
 
