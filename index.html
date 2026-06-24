@@ -780,7 +780,8 @@ async function runPipeline(imgData){
   lines.delete();
 
   setProgress(8,'Merge + filtro anti-mobília...');await sleep(20);
-  const network=completeWallNetwork(snapped,minDim);
+  const pruned=pruneImageEdgeSegments(snapped,PW,PH,minDim);
+  const network=completeWallNetwork(pruned,minDim);
   const structural=network.filter(l=>l.len>minDim*0.065);
   const filtered=filterIsolatedSegments(structural,minDim*0.18);
 
@@ -829,6 +830,32 @@ function filterIsolatedSegments(segs,proximity){
   });
 }
 
+function pruneImageEdgeSegments(segs,w,h,minDim){
+  if(segs.length<=4)return segs;
+  const margin=Math.max(8,Math.round(minDim*0.03));
+  const longLen=Math.max(40,Math.round(minDim*0.18));
+  const tol=Math.max(8,Math.round(minDim*0.02));
+  return segs.filter(s=>{
+    const nearEdge=s.t==='H'
+      ? (s.y1<=margin||s.y1>=h-margin)
+      : (s.x1<=margin||s.x1>=w-margin);
+    if(!nearEdge||s.len<longLen)return true;
+
+    const supported=segs.some(o=>{
+      if(o===s||o.t===s.t) return false;
+      if(s.t==='H'){
+        const spansY=o.y1<=s.y1+tol&&o.y2>=s.y1-tol;
+        const hitsStart=Math.abs(o.x1-s.x1)<=margin||Math.abs(o.x1-s.x2)<=margin;
+        return spansY&&hitsStart;
+      }
+      const spansX=o.x1<=s.x1+tol&&o.x2>=s.x1-tol;
+      const hitsStart=Math.abs(o.y1-s.y1)<=margin||Math.abs(o.y1-s.y2)<=margin;
+      return spansX&&hitsStart;
+    });
+    return supported;
+  });
+}
+
 function cropToPlanArea(gray){
   let blur=new cv.Mat(),paper=new cv.Mat(),closed=new cv.Mat();
   let contours=new cv.MatVector(),hierarchy=new cv.Mat();
@@ -874,8 +901,8 @@ function cropToPlanArea(gray){
 function completeWallNetwork(segs,minDim){
   if(!segs.length)return [];
   const axisTol=Math.max(6,Math.round(minDim*0.016));
-  const mergeGap=Math.max(8,Math.round(minDim*0.028));
-  const junctionGap=Math.max(12,Math.round(minDim*0.055));
+  const mergeGap=Math.max(7,Math.round(minDim*0.022));
+  const junctionGap=Math.max(10,Math.round(minDim*0.04));
 
   const snapped=snapWallAxes(segs,axisTol);
   let out=mergeColinear(snapped,axisTol,mergeGap)
