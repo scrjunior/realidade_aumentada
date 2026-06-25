@@ -761,11 +761,9 @@ async function runPipeline(imgData){
 
   setProgress(7);await sleep(20);
   const snapped=[];
-  const openingMarks=[];
   const doorHints=[];
   const snapTol=10;
   const filterLen=minDim*0.038;
-  const markMinLen=minDim*0.01;
   for(let i=0;i<lines.rows;i++){
     const[x1,y1,x2,y2]=[lines.data32S[i*4],lines.data32S[i*4+1],
                          lines.data32S[i*4+2],lines.data32S[i*4+3]];
@@ -774,16 +772,10 @@ async function runPipeline(imgData){
     const angle=Math.abs(Math.atan2(y2-y1,x2-x1)*180/Math.PI);
     if(angle<snapTol||(angle>180-snapTol)){
       const ym=Math.round((y1+y2)/2);
-      const seg={x1:Math.min(x1,x2),y1:ym,x2:Math.max(x1,x2),y2:ym,len:length,t:'H'};
-      if(length>=markMinLen)openingMarks.push(seg);
-      if(length<filterLen)continue;
-      snapped.push(seg);
+      snapped.push({x1:Math.min(x1,x2),y1:ym,x2:Math.max(x1,x2),y2:ym,len:length,t:'H'});
     }else if(angle>90-snapTol&&angle<90+snapTol){
       const xm=Math.round((x1+x2)/2);
-      const seg={x1:xm,y1:Math.min(y1,y2),x2:xm,y2:Math.max(y1,y2),len:length,t:'V'};
-      if(length>=markMinLen)openingMarks.push(seg);
-      if(length<filterLen)continue;
-      snapped.push(seg);
+      snapped.push({x1:xm,y1:Math.min(y1,y2),x2:xm,y2:Math.max(y1,y2),len:length,t:'V'});
     }else if(length<minDim*0.12){
       doorHints.push({x:(x1+x2)/2,y:(y1+y2)/2});
     }
@@ -813,7 +805,7 @@ async function runPipeline(imgData){
   const norm=(x,y)=>({x:(x-xMin)/nW*10-5,z:(y-yMin)/nH*8-4});
   const openings=detectOpenings(
     filtered,
-    openingMarks,
+    pruned,
     doorHints,
     minDim,
     norm,
@@ -1069,7 +1061,7 @@ function segsIntersect(a,b){
   return((cross(C,D,A)>0)!=(cross(C,D,B)>0))&&((cross(A,B,C)>0)!=(cross(A,B,D)>0));
 }
 
-function detectOpenings(walls,markSegs,doorHints,minDim,norm,bounds){
+function detectOpenings(walls,rawSegs,doorHints,minDim,norm,bounds){
   if(!walls.length)return [];
   const axisTol=Math.max(6,Math.round(minDim*0.018));
   const edgeTol=Math.max(10,Math.round(minDim*0.05));
@@ -1099,37 +1091,30 @@ function detectOpenings(walls,markSegs,doorHints,minDim,norm,bounds){
     return doorHints.some(h=>Math.hypot(h.x-x,h.y-y)<=reach);
   }
 
-  function countWindowMarks(type,axis,lo,hi,gap){
-    let count=0;
-    for(const s of markSegs){
-      if(s.t!==type)continue;
+  function hasWindowMark(type,axis,lo,hi,gap){
+    return rawSegs.some(s=>{
+      if(s.t!==type)return false;
       if(type==='H'){
         const sameAxis=Math.abs(s.y1-axis)<=axisTol*1.2;
-        const center=(s.x1+s.x2)/2;
-        const inside=center>=lo-axisTol&&center<=hi+axisTol;
-        const shortEnough=s.len>=Math.max(minDim*0.01,gap*0.18)&&s.len<=gap*0.92;
-        if(sameAxis&&inside&&shortEnough)count++;
-      }else{
-        const sameAxis=Math.abs(s.x1-axis)<=axisTol*1.2;
-        const center=(s.y1+s.y2)/2;
-        const inside=center>=lo-axisTol&&center<=hi+axisTol;
-        const shortEnough=s.len>=Math.max(minDim*0.01,gap*0.18)&&s.len<=gap*0.92;
-        if(sameAxis&&inside&&shortEnough)count++;
+        const inside=(s.x1+s.x2)/2>=lo-axisTol&&(s.x1+s.x2)/2<=hi+axisTol;
+        return sameAxis&&inside&&s.len>=gap*0.35&&s.len<=gap*1.4;
       }
-    }
-    return count;
+      const sameAxis=Math.abs(s.x1-axis)<=axisTol*1.2;
+      const inside=(s.y1+s.y2)/2>=lo-axisTol&&(s.y1+s.y2)/2<=hi+axisTol;
+      return sameAxis&&inside&&s.len>=gap*0.35&&s.len<=gap*1.4;
+    });
   }
 
   for(const g of groupByAxis('H')){
     const outer=Math.abs(g.avg-bounds.yMin)<=edgeTol||Math.abs(g.avg-bounds.yMax)<=edgeTol;
     if(!outer)continue;
-    const segs=walls.filter(s=>s.t==='H'&&Math.abs(s.y1-g.avg)<=axisTol*1.2).sort((a,b)=>a.x1-b.x1);
+    const segs=rawSegs.filter(s=>s.t==='H'&&Math.abs(s.y1-g.avg)<=axisTol*1.2).sort((a,b)=>a.x1-b.x1);
     for(let i=0;i<segs.length-1;i++){
       const gap=segs[i+1].x1-segs[i].x2;
       if(gap<minGap||gap>maxGap)continue;
       const mx=(segs[i].x2+segs[i+1].x1)/2,my=g.avg;
       if(isDoorHintAt(mx,my,gap))continue;
-      if(countWindowMarks('H',g.avg,segs[i].x2,segs[i+1].x1,gap)<2)continue;
+      if(!hasWindowMark('H',g.avg,segs[i].x2,segs[i+1].x1,gap))continue;
       const a=norm(mx-gap/2,my),b=norm(mx+gap/2,my);
       openings.push({kind:'window',t:'H',x1n:a.x,z1n:a.z,x2n:b.x,z2n:b.z,w:Math.abs(b.x-a.x)});
     }
@@ -1138,13 +1123,13 @@ function detectOpenings(walls,markSegs,doorHints,minDim,norm,bounds){
   for(const g of groupByAxis('V')){
     const outer=Math.abs(g.avg-bounds.xMin)<=edgeTol||Math.abs(g.avg-bounds.xMax)<=edgeTol;
     if(!outer)continue;
-    const segs=walls.filter(s=>s.t==='V'&&Math.abs(s.x1-g.avg)<=axisTol*1.2).sort((a,b)=>a.y1-b.y1);
+    const segs=rawSegs.filter(s=>s.t==='V'&&Math.abs(s.x1-g.avg)<=axisTol*1.2).sort((a,b)=>a.y1-b.y1);
     for(let i=0;i<segs.length-1;i++){
       const gap=segs[i+1].y1-segs[i].y2;
       if(gap<minGap||gap>maxGap)continue;
       const mx=g.avg,my=(segs[i].y2+segs[i+1].y1)/2;
       if(isDoorHintAt(mx,my,gap))continue;
-      if(countWindowMarks('V',g.avg,segs[i].y2,segs[i+1].y1,gap)<2)continue;
+      if(!hasWindowMark('V',g.avg,segs[i].y2,segs[i+1].y1,gap))continue;
       const a=norm(mx,my-gap/2),b=norm(mx,my+gap/2);
       openings.push({kind:'window',t:'V',x1n:a.x,z1n:a.z,x2n:b.x,z2n:b.z,w:Math.abs(b.z-a.z)});
     }
