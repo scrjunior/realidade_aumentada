@@ -805,6 +805,7 @@ async function runPipeline(imgData){
   const norm=(x,y)=>({x:(x-xMin)/nW*10-5,z:(y-yMin)/nH*8-4});
   const openings=detectOpenings(
     filtered,
+    pruned,
     doorHints,
     minDim,
     norm,
@@ -1060,7 +1061,7 @@ function segsIntersect(a,b){
   return((cross(C,D,A)>0)!=(cross(C,D,B)>0))&&((cross(A,B,C)>0)!=(cross(A,B,D)>0));
 }
 
-function detectOpenings(walls,doorHints,minDim,norm,bounds){
+function detectOpenings(walls,rawSegs,doorHints,minDim,norm,bounds){
   if(!walls.length)return [];
   const axisTol=Math.max(6,Math.round(minDim*0.018));
   const edgeTol=Math.max(10,Math.round(minDim*0.05));
@@ -1090,15 +1091,30 @@ function detectOpenings(walls,doorHints,minDim,norm,bounds){
     return doorHints.some(h=>Math.hypot(h.x-x,h.y-y)<=reach);
   }
 
+  function hasWindowMark(type,axis,lo,hi,gap){
+    return rawSegs.some(s=>{
+      if(s.t!==type)return false;
+      if(type==='H'){
+        const sameAxis=Math.abs(s.y1-axis)<=axisTol*1.2;
+        const inside=(s.x1+s.x2)/2>=lo-axisTol&&(s.x1+s.x2)/2<=hi+axisTol;
+        return sameAxis&&inside&&s.len>=gap*0.35&&s.len<=gap*1.4;
+      }
+      const sameAxis=Math.abs(s.x1-axis)<=axisTol*1.2;
+      const inside=(s.y1+s.y2)/2>=lo-axisTol&&(s.y1+s.y2)/2<=hi+axisTol;
+      return sameAxis&&inside&&s.len>=gap*0.35&&s.len<=gap*1.4;
+    });
+  }
+
   for(const g of groupByAxis('H')){
     const outer=Math.abs(g.avg-bounds.yMin)<=edgeTol||Math.abs(g.avg-bounds.yMax)<=edgeTol;
     if(!outer)continue;
-    const segs=g.segs.slice().sort((a,b)=>a.x1-b.x1);
+    const segs=rawSegs.filter(s=>s.t==='H'&&Math.abs(s.y1-g.avg)<=axisTol*1.2).sort((a,b)=>a.x1-b.x1);
     for(let i=0;i<segs.length-1;i++){
       const gap=segs[i+1].x1-segs[i].x2;
       if(gap<minGap||gap>maxGap)continue;
       const mx=(segs[i].x2+segs[i+1].x1)/2,my=g.avg;
       if(isDoorHintAt(mx,my,gap))continue;
+      if(!hasWindowMark('H',g.avg,segs[i].x2,segs[i+1].x1,gap))continue;
       const a=norm(mx-gap/2,my),b=norm(mx+gap/2,my);
       openings.push({kind:'window',t:'H',x1n:a.x,z1n:a.z,x2n:b.x,z2n:b.z,w:Math.abs(b.x-a.x)});
     }
@@ -1107,12 +1123,13 @@ function detectOpenings(walls,doorHints,minDim,norm,bounds){
   for(const g of groupByAxis('V')){
     const outer=Math.abs(g.avg-bounds.xMin)<=edgeTol||Math.abs(g.avg-bounds.xMax)<=edgeTol;
     if(!outer)continue;
-    const segs=g.segs.slice().sort((a,b)=>a.y1-b.y1);
+    const segs=rawSegs.filter(s=>s.t==='V'&&Math.abs(s.x1-g.avg)<=axisTol*1.2).sort((a,b)=>a.y1-b.y1);
     for(let i=0;i<segs.length-1;i++){
       const gap=segs[i+1].y1-segs[i].y2;
       if(gap<minGap||gap>maxGap)continue;
       const mx=g.avg,my=(segs[i].y2+segs[i+1].y1)/2;
       if(isDoorHintAt(mx,my,gap))continue;
+      if(!hasWindowMark('V',g.avg,segs[i].y2,segs[i+1].y1,gap))continue;
       const a=norm(mx,my-gap/2),b=norm(mx,my+gap/2);
       openings.push({kind:'window',t:'V',x1n:a.x,z1n:a.z,x2n:b.x,z2n:b.z,w:Math.abs(b.z-a.z)});
     }
@@ -1208,8 +1225,29 @@ function buildWalls(walls,openings=[]){
   const mWall=new THREE.MeshStandardMaterial({color:0xd8ccb8,roughness:.82,metalness:0,side:THREE.DoubleSide});
   const mTop=new THREE.MeshStandardMaterial({color:0xbfb59e,roughness:.9,metalness:0});
   const mFloor=new THREE.MeshStandardMaterial({color:0x9c9080,roughness:.95,metalness:0});
-  const mGlass=new THREE.MeshStandardMaterial({color:0xbfd8e6,roughness:.18,metalness:.1,transparent:true,opacity:.48});
-  const mFrame=new THREE.MeshStandardMaterial({color:0xf0ede7,roughness:.55,metalness:.03});
+  const mGlass=new THREE.MeshStandardMaterial({color:0xbfd8e6,roughness:.12,metalness:.08,transparent:true,opacity:.62});
+  const mFrame=new THREE.MeshStandardMaterial({color:0xf4f0e8,roughness:.48,metalness:.03});
+
+  function addWallPiece(cx,cy,cz,len,h,angle){
+    if(len<=0.04||h<=0.04)return;
+    const mesh=new THREE.Mesh(new THREE.BoxGeometry(len+WALL_T*.15,h,WALL_T),mWall);
+    mesh.position.set(cx,cy,cz);
+    mesh.rotation.y=-angle;
+    mesh.castShadow=true;mesh.receiveShadow=true;
+    hg.add(mesh);
+
+    const topMesh=new THREE.Mesh(new THREE.BoxGeometry(len+WALL_T*.2,.05,WALL_T+.02),mTop);
+    topMesh.position.set(cx,cy+h/2+.025,cz);
+    topMesh.rotation.y=-angle;
+    topMesh.castShadow=true;
+    hg.add(topMesh);
+
+    const edges=new THREE.EdgesGeometry(new THREE.BoxGeometry(len,h,WALL_T));
+    const edgeMesh=new THREE.LineSegments(edges,new THREE.LineBasicMaterial({color:0xc8392b,opacity:.5,transparent:true}));
+    edgeMesh.position.set(cx,cy,cz);
+    edgeMesh.rotation.y=-angle;
+    hg.add(edgeMesh);
+  }
 
   let x0=Infinity,x1=-Infinity,z0=Infinity,z1=-Infinity;
   for(const w of walls){
@@ -1228,21 +1266,48 @@ function buildWalls(walls,openings=[]){
     if(len<.15)continue;
     const cx=(w.x1n+w.x2n)/2,cz=(w.z1n+w.z2n)/2;
     const angle=Math.atan2(dz,dx);
+    const wallOpenings=openings.filter(op=>{
+      if(op.kind!=='window'||op.t!==w.t)return false;
+      if(w.t==='H'){
+        const sameAxis=Math.abs(op.z1n-w.z1n)<0.12&&Math.abs(op.z2n-w.z2n)<0.12;
+        const lo=Math.min(w.x1n,w.x2n)-0.05,hi=Math.max(w.x1n,w.x2n)+0.05;
+        return sameAxis&&Math.min(op.x1n,op.x2n)>=lo&&Math.max(op.x1n,op.x2n)<=hi;
+      }
+      const sameAxis=Math.abs(op.x1n-w.x1n)<0.12&&Math.abs(op.x2n-w.x2n)<0.12;
+      const lo=Math.min(w.z1n,w.z2n)-0.05,hi=Math.max(w.z1n,w.z2n)+0.05;
+      return sameAxis&&Math.min(op.z1n,op.z2n)>=lo&&Math.max(op.z1n,op.z2n)<=hi;
+    }).sort((a,b)=>(w.t==='H'?Math.min(a.x1n,a.x2n)-Math.min(b.x1n,b.x2n):Math.min(a.z1n,a.z2n)-Math.min(b.z1n,b.z2n)));
 
-    const wallMesh=new THREE.Mesh(new THREE.BoxGeometry(len+WALL_T,WALL_H,WALL_T),mWall);
-    wallMesh.position.set(cx,WALL_H/2,cz);
-    wallMesh.rotation.y=-angle;
-    wallMesh.castShadow=true;wallMesh.receiveShadow=true;
-    hg.add(wallMesh);
+    if(!wallOpenings.length){
+      addWallPiece(cx,WALL_H/2,cz,len, WALL_H, angle);
+      continue;
+    }
 
-    const topMesh=new THREE.Mesh(new THREE.BoxGeometry(len+WALL_T+.02,.05,WALL_T+.02),mTop);
-    topMesh.position.set(cx,WALL_H+.025,cz);
-    topMesh.rotation.y=-angle;topMesh.castShadow=true;hg.add(topMesh);
-
-    const edges=new THREE.EdgesGeometry(new THREE.BoxGeometry(len,WALL_H,WALL_T));
-    const edgeMesh=new THREE.LineSegments(edges,new THREE.LineBasicMaterial({color:0xc8392b,opacity:.5,transparent:true}));
-    edgeMesh.position.set(cx,WALL_H/2,cz);edgeMesh.rotation.y=-angle;
-    hg.add(edgeMesh);
+    if(w.t==='H'){
+      let cursor=Math.min(w.x1n,w.x2n);
+      const z=w.z1n;
+      const maxX=Math.max(w.x1n,w.x2n);
+      for(const op of wallOpenings){
+        const opLo=Math.min(op.x1n,op.x2n),opHi=Math.max(op.x1n,op.x2n);
+        const leftLen=opLo-cursor;
+        if(leftLen>0.04)addWallPiece(cursor+leftLen/2,WALL_H/2,z,leftLen,WALL_H,angle);
+        cursor=opHi;
+      }
+      const rightLen=maxX-cursor;
+      if(rightLen>0.04)addWallPiece(cursor+rightLen/2,WALL_H/2,z,rightLen,WALL_H,angle);
+    }else{
+      let cursor=Math.min(w.z1n,w.z2n);
+      const x=w.x1n;
+      const maxZ=Math.max(w.z1n,w.z2n);
+      for(const op of wallOpenings){
+        const opLo=Math.min(op.z1n,op.z2n),opHi=Math.max(op.z1n,op.z2n);
+        const lowLen=opLo-cursor;
+        if(lowLen>0.04)addWallPiece(x,WALL_H/2,cursor+lowLen/2,lowLen,WALL_H,angle);
+        cursor=opHi;
+      }
+      const topLen=maxZ-cursor;
+      if(topLen>0.04)addWallPiece(x,WALL_H/2,cursor+topLen/2,topLen,WALL_H,angle);
+    }
   }
 
   for(const op of openings.filter(o=>o.kind==='window')){
@@ -1287,6 +1352,16 @@ function buildWalls(walls,openings=[]){
     glass.position.set(cx,WIN_SILL+winH/2,cz);
     glass.rotation.y=-angle;
     hg.add(glass);
+
+    const mullion=new THREE.Mesh(
+      new THREE.BoxGeometry(op.t==='H'?.05:frameT*.24,Math.max(.3,winH-.1),op.t==='H'?frameT*.24:.05),
+      mFrame
+    );
+    mullion.position.set(cx,WIN_SILL+winH/2,cz);
+    mullion.rotation.y=-angle;
+    mullion.castShadow=true;
+    mullion.receiveShadow=true;
+    hg.add(mullion);
   }
 
   if(isWF)applyPillarView(true,walls);
