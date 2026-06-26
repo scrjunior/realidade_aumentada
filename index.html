@@ -816,7 +816,13 @@ async function runPipeline(imgData){
     textureOpenings=detectWindowsByTexture(traceMat,filtered,pruned,doorHints,minDim,norm,bounds);
   }catch(e){console.warn('detectWindowsByTexture falhou',e);}
   traceMat.delete();
-  const openings=gapOpenings.concat(textureOpenings);
+  // Junta os dois conjuntos com deduplicação: um gap real (quebra física na
+  // parede) é prova mais forte do que uma simples variação de brilho, por
+  // isso qualquer candidato de textura que se sobreponha espacialmente a um
+  // gap já detetado é descartado (seria a mesma janela contada 2x). Entre
+  // candidatos de textura sobrepostos entre si, mantém-se apenas o de maior
+  // contraste.
+  const openings=mergeOpenings(gapOpenings,textureOpenings);
   const wallData=filtered.map(w=>({
     x1n:norm(w.x1,w.y1).x,z1n:norm(w.x1,w.y1).z,
     x2n:norm(w.x2,w.y2).x,z2n:norm(w.x2,w.y2).z,
@@ -825,6 +831,35 @@ async function runPipeline(imgData){
 
   const rooms=estimateRooms(wallData);
   return{walls:wallData,openings,rooms,rawCount,wallCount:filtered.length,res:`${PW}×${PH}`};
+}
+
+function mergeOpenings(gapOpenings,textureOpenings){
+  function overlaps(a,b){
+    if(a.t!==b.t)return false;
+    const tol=0.18;
+    if(a.t==='H'){
+      if(Math.abs(a.z1n-b.z1n)>tol)return false;
+      const aLo=Math.min(a.x1n,a.x2n),aHi=Math.max(a.x1n,a.x2n);
+      const bLo=Math.min(b.x1n,b.x2n),bHi=Math.max(b.x1n,b.x2n);
+      return aLo<bHi&&bLo<aHi;
+    }
+    if(Math.abs(a.x1n-b.x1n)>tol)return false;
+    const aLo=Math.min(a.z1n,a.z2n),aHi=Math.max(a.z1n,a.z2n);
+    const bLo=Math.min(b.z1n,b.z2n),bHi=Math.max(b.z1n,b.z2n);
+    return aLo<bHi&&bLo<aHi;
+  }
+  // Remove candidatos de textura que coincidem com um gap real já confirmado.
+  let texFiltered=textureOpenings.filter(t=>!gapOpenings.some(g=>overlaps(g,t)));
+  // Entre candidatos de textura que se sobrepõem entre si, mantém só o de
+  // maior contraste (evita a mesma janela duplicada por varrer de paredes
+  // vizinhas/paralelas).
+  const kept=[];
+  for(const t of texFiltered){
+    const dupIdx=kept.findIndex(k=>overlaps(k,t));
+    if(dupIdx===-1){kept.push(t);continue;}
+    if((t.contrast||0)>(kept[dupIdx].contrast||0))kept[dupIdx]=t;
+  }
+  return gapOpenings.concat(kept);
 }
 
 function filterIsolatedSegments(segs,proximity){
@@ -1152,6 +1187,18 @@ function detectOpenings(walls,rawSegs,doorHints,minDim,norm,bounds){
     }
   }
 
+  // Filtro de plausibilidade: entre os vãos SEM marca de vidro (a deteção
+  // mais frágil, por exclusão), um candidato cuja largura seja um outlier
+  // extremo em relação aos restantes vãos da mesma planta é mais provável
+  // erro de deteção (ruído num único segmento) do que uma janela real.
+  // Vãos marcados (com traço de vidro confirmado) ficam sempre, por terem
+  // prova direta. Só filtra quando há candidatos suficientes para a
+  // comparação ser estatisticamente significativa.
+  if(openings.length>=3){
+    const widths=openings.map(o=>o.w).sort((a,b)=>a-b);
+    const med=widths[Math.floor(widths.length/2)];
+    return openings.filter(o=>o.marked||(o.w>=med*0.35&&o.w<=med*2.8));
+  }
   return openings;
 }
 
@@ -1182,6 +1229,10 @@ function detectWindowsByTexture(mat,walls,rawSegs,doorHints,minDim,norm,bounds){
   const endMargin=Math.max(8,Math.round(minDim*0.03));
   const doorReach=Math.max(14,Math.round(minDim*0.05));
   const lightCap=232; // acima disto é fundo aberto (porta), não janela
+  // Contraste mínimo ABSOLUTO entre a parede maciça e o trecho candidato.
+  // Sem isto, ruído/sombra/JPEG cria falsos positivos mesmo numa parede
+  // perfeitamente sólida — o limiar relativo por parede não basta.
+  const MIN_ABS_CONTRAST=34;
 
   const data=mat.data,cols=mat.cols,rows=mat.rows;
   function sampleBand(cx,cy,alongH){
@@ -1217,6 +1268,14 @@ function detectWindowsByTexture(mat,walls,rawSegs,doorHints,minDim,norm,bounds){
     return false;
   }
 
+  // Também não aceitar um trecho "claro" colado à ponta da própria parede
+  // (canto do edifício) — aí é quase sempre o exterior a "vazar" para a
+  // amostra, não vidro real.
+  function tooCloseToWallEnd(lo,hi,wallLo,wallHi){
+    const margin=Math.max(endMargin*1.4,minRun*0.5);
+    return (lo-wallLo)<margin||(wallHi-hi)<margin;
+  }
+
   const out=[];
   for(const w of walls){
     const isH=w.t==='H';
@@ -1243,6 +1302,11 @@ function detectWindowsByTexture(mat,walls,rawSegs,doorHints,minDim,norm,bounds){
     const darkBase=sortedVals[Math.floor(sortedVals.length*0.18)].val;
     const delta=Math.max(26,(lightCap-darkBase)*0.32);
     const lightThresh=Math.min(lightCap,darkBase+delta);
+    // Contraste real disponível nesta parede — se a parede inteira já for
+    // uniformemente clara (pouca variação), não há informação fiável para
+    // decidir "janela aqui", por isso ignoramo-la em vez de adivinhar.
+    const wallContrast=sortedVals[sortedVals.length-1].val-darkBase;
+    if(wallContrast<MIN_ABS_CONTRAST)continue;
 
     let runStart=null;
     for(let i=0;i<profile.length;i++){
@@ -1254,15 +1318,39 @@ function detectWindowsByTexture(mat,walls,rawSegs,doorHints,minDim,norm,bounds){
         const runLo=profile[runStart].p,runHi=profile[runEnd].p;
         const runLen=runHi-runLo;
         if(runLen>=minRun&&runLen<=maxRun&&runStart>0&&runEnd<profile.length-1&&
-           !tooCloseToGapOrDoor(w.t,axis,runLo,runHi)){
-          out.push({type:w.t,axis,lo:runLo,hi:runHi});
+           !tooCloseToGapOrDoor(w.t,axis,runLo,runHi)&&
+           !tooCloseToWallEnd(runLo,runHi,lo,hi)){
+          // Exigir que ambos os vizinhos imediatos fora do trecho sejam
+          // efetivamente mais escuros (queda real), não apenas uma amostra
+          // que tocou o limiar por ruído — confirma escuro→claro→escuro.
+          const before=profile[runStart-1].val;
+          const after=profile[Math.min(profile.length-1,runEnd+1)].val;
+          const peak=Math.max(...profile.slice(runStart,runEnd+1).map(p=>p.val));
+          if(peak-before>=MIN_ABS_CONTRAST*0.6&&peak-after>=MIN_ABS_CONTRAST*0.6){
+            out.push({type:w.t,axis,lo:runLo,hi:runHi,contrast:peak-darkBase});
+          }
         }
         runStart=null;
       }
     }
   }
 
-  return out.map(o=>{
+  // Filtro de plausibilidade global: numa mesma planta, janelas detetadas
+  // por textura tendem a ter larguras semelhantes. Um trecho isolado muito
+  // fora do padrão (ex.: muito mais estreito ou muito mais largo que os
+  // outros) é mais provável ruído do que uma janela real — descarta
+  // outliers extremos apenas quando já há candidatos suficientes para
+  // comparar de forma fiável.
+  let result=out;
+  if(out.length>=3){
+    const widths=out.map(o=>o.hi-o.lo).sort((a,b)=>a-b);
+    const med=widths[Math.floor(widths.length/2)];
+    result=out.filter(o=>{
+      const wid=o.hi-o.lo;
+      return wid>=med*0.4&&wid<=med*2.6;
+    });
+  }
+  return result.map(o=>{
     if(o.type==='H'){
       const a=norm(o.lo,o.axis),b=norm(o.hi,o.axis);
       return {kind:'window',t:'H',x1n:a.x,z1n:a.z,x2n:b.x,z2n:b.z,w:Math.abs(b.x-a.x),marked:false,byTexture:true};
