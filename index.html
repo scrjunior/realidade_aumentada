@@ -764,21 +764,28 @@ async function runPipeline(imgData){
 
   setProgress(7);await sleep(20);
   const snapped=[];
+  const openingMarks=[];
   const doorHints=[];
   const snapTol=10;
   const filterLen=minDim*0.038;
+  const markMinLen=minDim*0.01;
   for(let i=0;i<lines.rows;i++){
     const[x1,y1,x2,y2]=[lines.data32S[i*4],lines.data32S[i*4+1],
                          lines.data32S[i*4+2],lines.data32S[i*4+3]];
     const length=Math.hypot(x2-x1,y2-y1);
-    if(length<filterLen)continue;
     const angle=Math.abs(Math.atan2(y2-y1,x2-x1)*180/Math.PI);
     if(angle<snapTol||(angle>180-snapTol)){
       const ym=Math.round((y1+y2)/2);
-      snapped.push({x1:Math.min(x1,x2),y1:ym,x2:Math.max(x1,x2),y2:ym,len:length,t:'H'});
+      const seg={x1:Math.min(x1,x2),y1:ym,x2:Math.max(x1,x2),y2:ym,len:length,t:'H'};
+      if(length>=markMinLen)openingMarks.push(seg);
+      if(length<filterLen)continue;
+      snapped.push(seg);
     }else if(angle>90-snapTol&&angle<90+snapTol){
       const xm=Math.round((x1+x2)/2);
-      snapped.push({x1:xm,y1:Math.min(y1,y2),x2:xm,y2:Math.max(y1,y2),len:length,t:'V'});
+      const seg={x1:xm,y1:Math.min(y1,y2),x2:xm,y2:Math.max(y1,y2),len:length,t:'V'};
+      if(length>=markMinLen)openingMarks.push(seg);
+      if(length<filterLen)continue;
+      snapped.push(seg);
     }else if(length<minDim*0.12){
       doorHints.push({x:(x1+x2)/2,y:(y1+y2)/2});
     }
@@ -808,15 +815,15 @@ async function runPipeline(imgData){
   const norm=(x,y)=>({x:(x-xMin)/nW*10-5,z:(y-yMin)/nH*8-4});
   const bounds={xMin,xMax,yMin,yMax};
   // Passo A: janelas/portas que aparecem como uma quebra real na parede.
-  const gapOpenings=detectOpenings(filtered,pruned,doorHints,minDim,norm,bounds);
+  const gapOpenings=detectOpenings(filtered,openingMarks,doorHints,minDim,norm,bounds);
   // Passo B: janelas que NÃO quebram a parede — apenas um trecho mais claro
   // (vidro/peitoril desenhado dentro da própria espessura da parede).
   let textureOpenings=[];
   try{
-    textureOpenings=detectWindowsByTexture(traceMat,filtered,pruned,doorHints,minDim,norm,bounds);
+    textureOpenings=detectWindowsByTexture(traceMat,filtered,openingMarks,doorHints,minDim,norm,bounds);
   }catch(e){console.warn('detectWindowsByTexture falhou',e);}
   traceMat.delete();
-  const openings=gapOpenings.concat(textureOpenings);
+  const openings=mergeWindowOpenings(gapOpenings.concat(textureOpenings));
   const wallData=filtered.map(w=>({
     x1n:norm(w.x1,w.y1).x,z1n:norm(w.x1,w.y1).z,
     x2n:norm(w.x2,w.y2).x,z2n:norm(w.x2,w.y2).z,
@@ -1067,7 +1074,7 @@ function segsIntersect(a,b){
   return((cross(C,D,A)>0)!=(cross(C,D,B)>0))&&((cross(A,B,C)>0)!=(cross(A,B,D)>0));
 }
 
-function detectOpenings(walls,rawSegs,doorHints,minDim,norm,bounds){
+function detectOpenings(walls,markSegs,doorHints,minDim,norm,bounds){
   if(!walls.length)return [];
   const axisTol=Math.max(6,Math.round(minDim*0.018));
   const edgeTol=Math.max(10,Math.round(minDim*0.05));
@@ -1076,6 +1083,7 @@ function detectOpenings(walls,rawSegs,doorHints,minDim,norm,bounds){
   // (ex.: sala, varanda) que antes ficavam fora do intervalo.
   const minGap=Math.max(10,Math.round(minDim*0.022));
   const maxGap=Math.max(34,Math.round(minDim*0.22));
+  const minSupport=Math.max(18,Math.round(minDim*0.05));
   const openings=[];
 
   function groupByAxis(type){
@@ -1104,18 +1112,25 @@ function detectOpenings(walls,rawSegs,doorHints,minDim,norm,bounds){
   // Já não é exigido para classificar como janela — muitas plantas marcam
   // a janela apenas com um corte limpo na linha da parede, sem traço de
   // vidro — mas, quando existe, reforça a deteção.
-  function hasWindowMark(type,axis,lo,hi,gap){
-    return rawSegs.some(s=>{
-      if(s.t!==type)return false;
+  function countWindowMarks(type,axis,lo,hi,gap){
+    let count=0;
+    for(const s of markSegs){
+      if(s.t!==type)continue;
       if(type==='H'){
         const sameAxis=Math.abs(s.y1-axis)<=axisTol*1.2;
-        const inside=(s.x1+s.x2)/2>=lo-axisTol&&(s.x1+s.x2)/2<=hi+axisTol;
-        return sameAxis&&inside&&s.len>=gap*0.3&&s.len<=gap*1.5;
+        const center=(s.x1+s.x2)/2;
+        const inside=center>=lo-axisTol&&center<=hi+axisTol;
+        const shortEnough=s.len>=Math.max(minDim*0.01,gap*0.18)&&s.len<=gap*0.92;
+        if(sameAxis&&inside&&shortEnough)count++;
+      }else{
+        const sameAxis=Math.abs(s.x1-axis)<=axisTol*1.2;
+        const center=(s.y1+s.y2)/2;
+        const inside=center>=lo-axisTol&&center<=hi+axisTol;
+        const shortEnough=s.len>=Math.max(minDim*0.01,gap*0.18)&&s.len<=gap*0.92;
+        if(sameAxis&&inside&&shortEnough)count++;
       }
-      const sameAxis=Math.abs(s.x1-axis)<=axisTol*1.2;
-      const inside=(s.y1+s.y2)/2>=lo-axisTol&&(s.y1+s.y2)/2<=hi+axisTol;
-      return sameAxis&&inside&&s.len>=gap*0.3&&s.len<=gap*1.5;
-    });
+    }
+    return count;
   }
 
   // Qualquer vão numa parede exterior que não corresponda a uma porta
@@ -1125,30 +1140,36 @@ function detectOpenings(walls,rawSegs,doorHints,minDim,norm,bounds){
   for(const g of groupByAxis('H')){
     const outer=Math.abs(g.avg-bounds.yMin)<=edgeTol||Math.abs(g.avg-bounds.yMax)<=edgeTol;
     if(!outer)continue;
-    const segs=rawSegs.filter(s=>s.t==='H'&&Math.abs(s.y1-g.avg)<=axisTol*1.2).sort((a,b)=>a.x1-b.x1);
+    const segs=walls.filter(s=>s.t==='H'&&Math.abs(s.y1-g.avg)<=axisTol*1.2).sort((a,b)=>a.x1-b.x1);
     for(let i=0;i<segs.length-1;i++){
       const gap=segs[i+1].x1-segs[i].x2;
       if(gap<minGap||gap>maxGap)continue;
+      const leftSupport=segs[i].x2-segs[i].x1;
+      const rightSupport=segs[i+1].x2-segs[i+1].x1;
+      if(leftSupport<minSupport||rightSupport<minSupport)continue;
       const mx=(segs[i].x2+segs[i+1].x1)/2,my=g.avg;
       if(isDoorHintAt(mx,my,gap))continue;
+      if(countWindowMarks('H',g.avg,segs[i].x2,segs[i+1].x1,gap)<2)continue;
       const a=norm(mx-gap/2,my),b=norm(mx+gap/2,my);
-      openings.push({kind:'window',t:'H',x1n:a.x,z1n:a.z,x2n:b.x,z2n:b.z,w:Math.abs(b.x-a.x),
-        marked:hasWindowMark('H',g.avg,segs[i].x2,segs[i+1].x1,gap)});
+      openings.push({kind:'window',t:'H',x1n:a.x,z1n:a.z,x2n:b.x,z2n:b.z,w:Math.abs(b.x-a.x),marked:true});
     }
   }
 
   for(const g of groupByAxis('V')){
     const outer=Math.abs(g.avg-bounds.xMin)<=edgeTol||Math.abs(g.avg-bounds.xMax)<=edgeTol;
     if(!outer)continue;
-    const segs=rawSegs.filter(s=>s.t==='V'&&Math.abs(s.x1-g.avg)<=axisTol*1.2).sort((a,b)=>a.y1-b.y1);
+    const segs=walls.filter(s=>s.t==='V'&&Math.abs(s.x1-g.avg)<=axisTol*1.2).sort((a,b)=>a.y1-b.y1);
     for(let i=0;i<segs.length-1;i++){
       const gap=segs[i+1].y1-segs[i].y2;
       if(gap<minGap||gap>maxGap)continue;
+      const lowerSupport=segs[i].y2-segs[i].y1;
+      const upperSupport=segs[i+1].y2-segs[i+1].y1;
+      if(lowerSupport<minSupport||upperSupport<minSupport)continue;
       const mx=g.avg,my=(segs[i].y2+segs[i+1].y1)/2;
       if(isDoorHintAt(mx,my,gap))continue;
+      if(countWindowMarks('V',g.avg,segs[i].y2,segs[i+1].y1,gap)<2)continue;
       const a=norm(mx,my-gap/2),b=norm(mx,my+gap/2);
-      openings.push({kind:'window',t:'V',x1n:a.x,z1n:a.z,x2n:b.x,z2n:b.z,w:Math.abs(b.z-a.z),
-        marked:hasWindowMark('V',g.avg,segs[i].y2,segs[i+1].y1,gap)});
+      openings.push({kind:'window',t:'V',x1n:a.x,z1n:a.z,x2n:b.x,z2n:b.z,w:Math.abs(b.z-a.z),marked:true});
     }
   }
 
@@ -1172,7 +1193,7 @@ function detectOpenings(walls,rawSegs,doorHints,minDim,norm,bounds){
 //  escuro → claro (mas não branco total, isso seria uma porta/abertura
 //  real, já tratada por detectOpenings) → escuro outra vez.
 //
-function detectWindowsByTexture(mat,walls,rawSegs,doorHints,minDim,norm,bounds){
+function detectWindowsByTexture(mat,walls,markSegs,doorHints,minDim,norm,bounds){
   if(!mat||!walls.length)return [];
   const edgeTol=Math.max(10,Math.round(minDim*0.05));
   const halfThick=Math.max(4,Math.round(minDim*0.022));
@@ -1198,6 +1219,27 @@ function detectWindowsByTexture(mat,walls,rawSegs,doorHints,minDim,norm,bounds){
     return n?sum/n:255;
   }
 
+  function countWindowMarks(type,axis,lo,hi,runLen){
+    let count=0;
+    for(const s of markSegs){
+      if(s.t!==type)continue;
+      if(type==='H'){
+        const sameAxis=Math.abs(s.y1-axis)<=halfThick*1.6;
+        const center=(s.x1+s.x2)/2;
+        const inside=center>=lo-halfThick&&center<=hi+halfThick;
+        const shortEnough=s.len>=Math.max(minDim*0.01,runLen*0.18)&&s.len<=runLen*0.95;
+        if(sameAxis&&inside&&shortEnough)count++;
+      }else{
+        const sameAxis=Math.abs(s.x1-axis)<=halfThick*1.6;
+        const center=(s.y1+s.y2)/2;
+        const inside=center>=lo-halfThick&&center<=hi+halfThick;
+        const shortEnough=s.len>=Math.max(minDim*0.01,runLen*0.18)&&s.len<=runLen*0.95;
+        if(sameAxis&&inside&&shortEnough)count++;
+      }
+    }
+    return count;
+  }
+
   function tooCloseToGapOrDoor(type,axis,lo,hi){
     if(doorHints.some(h=>{
       const along=type==='H'?h.x:h.y, cross=type==='H'?h.y:h.x;
@@ -1206,7 +1248,7 @@ function detectWindowsByTexture(mat,walls,rawSegs,doorHints,minDim,norm,bounds){
     // Há um gap real (quebra) entre dois segmentos de parede neste mesmo
     // eixo que se sobrepõe ao trecho candidato? Esse caso já é tratado
     // por detectOpenings (porta ou janela-por-quebra) — não duplicar.
-    const segs=rawSegs.filter(s=>s.t===type&&Math.abs((type==='H'?s.y1:s.x1)-axis)<=doorReach)
+    const segs=walls.filter(s=>s.t===type&&Math.abs((type==='H'?s.y1:s.x1)-axis)<=doorReach)
       .sort((a,b)=>(type==='H'?a.x1-b.x1:a.y1-b.y1));
     for(let i=0;i<segs.length-1;i++){
       const gLo=type==='H'?segs[i].x2:segs[i].y2;
@@ -1253,8 +1295,12 @@ function detectWindowsByTexture(mat,walls,rawSegs,doorHints,minDim,norm,bounds){
         const runEnd=isLight?i:i-1;
         const runLo=profile[runStart].p,runHi=profile[runEnd].p;
         const runLen=runHi-runLo;
+        const edgeLeft=profile[runStart-1]?.val ?? darkBase;
+        const edgeRight=profile[runEnd+1]?.val ?? darkBase;
+        const contrastOk=edgeLeft<lightThresh-step&&edgeRight<lightThresh-step;
+        const markCount=countWindowMarks(w.t,axis,runLo,runHi,runLen);
         if(runLen>=minRun&&runLen<=maxRun&&runStart>0&&runEnd<profile.length-1&&
-           !tooCloseToGapOrDoor(w.t,axis,runLo,runHi)){
+           contrastOk&&markCount>=2&&!tooCloseToGapOrDoor(w.t,axis,runLo,runHi)){
           out.push({type:w.t,axis,lo:runLo,hi:runHi});
         }
         runStart=null;
@@ -1275,6 +1321,39 @@ function detectWindowsByTexture(mat,walls,rawSegs,doorHints,minDim,norm,bounds){
 // ═══════════════════════════════════════════════════════
 //  THREE.JS — MODELO 3D
 // ═══════════════════════════════════════════════════════
+function mergeWindowOpenings(openings){
+  const merged=[];
+  for(const op of openings){
+    const found=merged.find(existing=>{
+      if(existing.t!==op.t)return false;
+      if(op.t==='H'){
+        const sameAxis=Math.abs(existing.z1n-op.z1n)<0.12&&Math.abs(existing.z2n-op.z2n)<0.12;
+        const a0=Math.min(existing.x1n,existing.x2n),a1=Math.max(existing.x1n,existing.x2n);
+        const b0=Math.min(op.x1n,op.x2n),b1=Math.max(op.x1n,op.x2n);
+        return sameAxis&&!(a1<b0-0.12||b1<a0-0.12);
+      }
+      const sameAxis=Math.abs(existing.x1n-op.x1n)<0.12&&Math.abs(existing.x2n-op.x2n)<0.12;
+      const a0=Math.min(existing.z1n,existing.z2n),a1=Math.max(existing.z1n,existing.z2n);
+      const b0=Math.min(op.z1n,op.z2n),b1=Math.max(op.z1n,op.z2n);
+      return sameAxis&&!(a1<b0-0.12||b1<a0-0.12);
+    });
+    if(!found){
+      merged.push({...op});
+      continue;
+    }
+    const better=(Number(!!op.marked)*4)+(Number(!op.byTexture)*2)+(op.w||0);
+    const current=(Number(!!found.marked)*4)+(Number(!found.byTexture)*2)+(found.w||0);
+    if(better>current){
+      Object.assign(found,op);
+    }else{
+      found.marked=found.marked||op.marked;
+      found.byTexture=found.byTexture&&op.byTexture;
+      found.w=Math.max(found.w||0,op.w||0);
+    }
+  }
+  return merged;
+}
+
 function build3D(data){
   on('view3d');on('back-btn');
   el('v3-info').textContent=data.wallCount+' paredes';
